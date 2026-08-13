@@ -2,10 +2,14 @@ const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+
 
 require('dotenv').config();
 
 const User = require('./models/user.model');
+const EmailOtp = require('./models/otp.model');
+const { sendOtpEmail } = require('./services/email.service');
 
 const app = express();
 
@@ -47,9 +51,66 @@ app.post('/api/auth/register', async (req, res) => {
             lastName,
             email,
             password,
-            confirmPassword
+            confirmPassword,
+            verificationToken
         } = req.body;
 
+                if (!verificationToken) {
+
+            return res.status(400).json({
+                message: 'Please verify your email first'
+            });
+
+        }
+
+
+        let decodedToken;
+
+        try {
+
+            decodedToken = jwt.verify(
+                verificationToken,
+                process.env.JWT_SECRET
+            );
+
+        } catch (error) {
+
+            return res.status(400).json({
+                message:
+                    'Email verification expired. Please verify your email again.'
+            });
+
+        }
+
+
+        if (
+            decodedToken.purpose !==
+            'email-verification'
+        ) {
+
+            return res.status(400).json({
+                message:
+                    'Invalid email verification'
+            });
+
+        }
+
+
+        const normalizedEmail =
+            email.toLowerCase().trim();
+
+
+        if (
+            decodedToken.email !==
+            normalizedEmail
+        ) {
+
+            return res.status(400).json({
+                message:
+                    'Verified email does not match registration email'
+            });
+
+        }
 
         // Required fields
         if (
@@ -104,6 +165,7 @@ app.post('/api/auth/register', async (req, res) => {
 
         }
 
+        
 
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 12);
@@ -138,6 +200,244 @@ app.post('/api/auth/register', async (req, res) => {
 
         res.status(500).json({
             message: 'Something went wrong'
+        });
+
+    }
+
+});
+
+app.post('/api/auth/send-otp', async (req, res) => {
+
+    try {
+
+        const { email } = req.body;
+
+        // Required validation
+        if (!email) {
+
+            return res.status(400).json({
+                message: 'Email is required'
+            });
+
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+
+
+        // Validate email format
+        const emailRegex =
+            /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+        if (!emailRegex.test(normalizedEmail)) {
+
+            return res.status(400).json({
+                message: 'Please provide a valid email'
+            });
+
+        }
+
+
+        // Check if email already registered
+        const existingUser = await User.findOne({
+            email: normalizedEmail
+        });
+
+        if (existingUser) {
+
+            return res.status(409).json({
+                message: 'Email already registered'
+            });
+
+        }
+
+
+        // Generate 6 digit OTP
+        const otp = Math.floor(
+            100000 + Math.random() * 900000
+        ).toString();
+
+
+        // Hash OTP
+        const hashedOtp = await bcrypt.hash(otp, 10);
+
+
+        // Remove previous OTP
+        await EmailOtp.deleteMany({
+            email: normalizedEmail
+        });
+
+
+        // OTP expires in 5 minutes
+        const expiresAt = new Date(
+            Date.now() + 5 * 60 * 1000
+        );
+
+
+        // Save OTP
+        await EmailOtp.create({
+            email: normalizedEmail,
+            otp: hashedOtp,
+            expiresAt
+        });
+
+
+        // Send email
+        await sendOtpEmail(
+            normalizedEmail,
+            otp
+        );
+
+
+        res.status(200).json({
+            message: 'OTP sent successfully'
+        });
+
+
+    } catch (error) {
+
+        console.error('Send OTP error:', error);
+
+        res.status(500).json({
+            message: 'Failed to send OTP'
+        });
+
+    }
+
+});
+
+app.post('/api/auth/verify-otp', async (req, res) => {
+
+    try {
+
+        const {
+            email,
+            otp
+        } = req.body;
+
+
+        if (!email || !otp) {
+
+            return res.status(400).json({
+                message: 'Email and OTP are required'
+            });
+
+        }
+
+
+        const normalizedEmail =
+            email.toLowerCase().trim();
+
+
+        // Find OTP
+        const otpRecord = await EmailOtp
+            .findOne({
+                email: normalizedEmail
+            })
+            .sort({
+                createdAt: -1
+            });
+
+
+        if (!otpRecord) {
+
+            return res.status(400).json({
+                message: 'OTP not found. Please request a new OTP.'
+            });
+
+        }
+
+
+        // Check expiry
+        if (
+            new Date() > otpRecord.expiresAt
+        ) {
+
+            await EmailOtp.deleteOne({
+                _id: otpRecord._id
+            });
+
+            return res.status(400).json({
+                message: 'OTP has expired. Please request a new OTP.'
+            });
+
+        }
+
+
+        // Maximum attempts
+        if (otpRecord.attempts >= 5) {
+
+            await EmailOtp.deleteOne({
+                _id: otpRecord._id
+            });
+
+            return res.status(429).json({
+                message:
+                    'Too many incorrect attempts. Please request a new OTP.'
+            });
+
+        }
+
+
+        // Compare OTP
+        const isValidOtp =
+            await bcrypt.compare(
+                otp,
+                otpRecord.otp
+            );
+
+
+        if (!isValidOtp) {
+
+            otpRecord.attempts += 1;
+
+            await otpRecord.save();
+
+            return res.status(400).json({
+                message: 'Invalid OTP'
+            });
+
+        }
+
+
+        // OTP verified
+        await EmailOtp.deleteOne({
+            _id: otpRecord._id
+        });
+
+
+        // Generate verification token
+        const verificationToken =
+            jwt.sign(
+                {
+                    email: normalizedEmail,
+                    purpose: 'email-verification'
+                },
+                process.env.JWT_SECRET,
+                {
+                    expiresIn: '15m'
+                }
+            );
+
+
+        res.status(200).json({
+
+            message:
+                'Email verified successfully',
+
+            verificationToken
+
+        });
+
+
+    } catch (error) {
+
+        console.error(
+            'Verify OTP error:',
+            error
+        );
+
+        res.status(500).json({
+            message: 'Failed to verify OTP'
         });
 
     }

@@ -1,3 +1,11 @@
+require('dotenv').config();
+
+const dns = require('dns');
+
+dns.setServers([
+  '8.8.8.8',
+  '1.1.1.1'
+]);
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
@@ -5,16 +13,39 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 
-require('dotenv').config();
 
 const User = require('./models/user.model');
 const EmailOtp = require('./models/otp.model');
 const { sendOtpEmail } = require('./services/email.service');
 
+const cookieParser = require('cookie-parser');
+
+const {
+    generateAccessToken,
+    generateRefreshToken
+} = require('./utils/token.util');
+
+const chatRoutes =
+    require('./routes/chat.routes');
+
 const app = express();
 
-app.use(cors());
+app.use(
+    cors({
+        origin: 'http://localhost:4200',
+        credentials: true,
+        exposedHeaders: [
+            'X-Access-Token',
+            'X-Refresh-Token'
+        ]
+    })
+);
 app.use(express.json());
+app.use(cookieParser());
+app.use(
+    '/api/chat',
+    chatRoutes
+);
 
 const PORT = process.env.PORT || 3000;
 
@@ -438,6 +469,159 @@ app.post('/api/auth/verify-otp', async (req, res) => {
 
         res.status(500).json({
             message: 'Failed to verify OTP'
+        });
+
+    }
+
+});
+
+app.post('/api/auth/login', async (req, res) => {
+
+    try {
+
+        const {
+            email,
+            password
+        } = req.body;
+
+
+        // -----------------------------
+        // Required validation
+        // -----------------------------
+
+        if (!email || !password) {
+
+            return res.status(400).json({
+                message: 'Email and password are required'
+            });
+
+        }
+
+
+        const normalizedEmail =
+            email.toLowerCase().trim();
+
+
+        // -----------------------------
+        // Find user
+        // -----------------------------
+
+        const user = await User.findOne({
+            email: normalizedEmail
+        });
+
+
+        if (!user) {
+
+            return res.status(401).json({
+                message: 'Invalid email or password'
+            });
+
+        }
+
+
+        // -----------------------------
+        // Compare password
+        // -----------------------------
+
+        const isPasswordValid =
+            await bcrypt.compare(
+                password,
+                user.password
+            );
+
+
+        if (!isPasswordValid) {
+
+            return res.status(401).json({
+                message: 'Invalid email or password'
+            });
+
+        }
+
+
+        // -----------------------------
+        // Generate tokens
+        // -----------------------------
+
+        const accessToken =
+            generateAccessToken(user);
+
+        const refreshToken =
+            generateRefreshToken(user);
+
+
+        // -----------------------------
+        // Send refresh token as cookie
+        // -----------------------------
+
+        res.cookie(
+            'refreshToken',
+            refreshToken,
+            {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite:
+                    process.env.NODE_ENV === 'production'
+                        ? 'none'
+                        : 'lax',
+
+                maxAge: 7 * 24 * 60 * 60 * 1000
+            }
+        );
+
+
+        // -----------------------------
+        // Also send tokens in headers
+        // -----------------------------
+
+        res.setHeader(
+            'X-Access-Token',
+            accessToken
+        );
+
+        res.setHeader(
+            'X-Refresh-Token',
+            refreshToken
+        );
+
+
+        // -----------------------------
+        // Response
+        // -----------------------------
+
+        return res.status(200).json({
+
+            message: 'Login successful',
+
+            accessToken,
+
+            refreshToken,
+
+            user: {
+
+                id: user._id,
+
+                firstName: user.firstName,
+
+                lastName: user.lastName,
+
+                email: user.email
+
+            }
+
+        });
+
+
+    } catch (error) {
+
+        console.error(
+            'Login error:',
+            error
+        );
+
+        return res.status(500).json({
+            message: 'Something went wrong'
         });
 
     }

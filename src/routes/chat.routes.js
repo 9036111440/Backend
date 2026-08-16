@@ -7,6 +7,9 @@ const Conversation =
 const authenticateUser =
     require('../middleware/auth.middleware');
 
+const User =
+    require('../models/user.model');
+
 const {
     generateTextResponse,
     generateImageResponse,
@@ -63,7 +66,16 @@ router.post(
 
             }
 
-            const userId = '6a7fe149a5a74971d2200e10'
+            const userId = '6a815adb619aefa5cee162a6'
+            const user = await User.findById(userId);
+
+if (!user) {
+
+    return res.status(404).json({
+        message: 'User not found'
+    });
+
+}
 
             // const userId =
             //     req.user.userId || 1000;
@@ -120,6 +132,50 @@ router.post(
                         messages: []
 
                     });
+
+            }
+
+
+            // =================================
+            // CHECK CHAT LIMIT
+            // =================================
+
+            if (user.plan === 'demo') {
+
+                const userChatCount =
+                    conversation.messages.filter(
+                        msg =>
+                            msg.role === 'user'
+                    ).length;
+
+
+                console.log(
+                    `📊 Demo chat usage: ${userChatCount}/3`
+                );
+
+
+                if (userChatCount >= 3) {
+
+                    return res.status(403).json({
+
+                        code:
+                            'CHAT_LIMIT_REACHED',
+
+                        message:
+                            'You have reached the 3-message Demo limit for this conversation.',
+
+                        plan:
+                            'demo',
+
+                        limit:
+                            3,
+
+                        used:
+                            userChatCount
+
+                    });
+
+                }
 
             }
 
@@ -331,7 +387,7 @@ router.get(
             const conversations =
                 await Conversation
                     .find({
-                        userId: '6a7fe149a5a74971d2200e10'
+                        userId: '6a815adb619aefa5cee162a6'
                         // req.user.userId || 1000
                     })
                     .sort({
@@ -393,7 +449,7 @@ router.get(
                     _id:
                         req.params.id,
 
-                    userId: '6a7fe149a5a74971d2200e10'
+                    userId: '6a815adb619aefa5cee162a6'
                     // req.user.userId || 1000
 
                 });

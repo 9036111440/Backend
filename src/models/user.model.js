@@ -25,7 +25,17 @@ const userSchema = new mongoose.Schema(
         password: {
             type: String,
             required: true
-        }
+        },
+            plan: {
+        type: String,
+        enum: ['demo', 'pro'],
+        default: 'demo'
+    },
+
+    proActivatedAt: {
+        type: Date,
+        default: null
+    }
     },
     {
         timestamps: true

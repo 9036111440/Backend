@@ -11,6 +11,8 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const paymentRoutes =
+    require('./routes/payment.routes');
 
 
 
@@ -45,6 +47,10 @@ app.use(cookieParser());
 app.use(
     '/api/chat',
     chatRoutes
+);
+app.use(
+    '/api/payment',
+    paymentRoutes
 );
 
 const PORT = process.env.PORT || 3000;

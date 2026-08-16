@@ -31,17 +31,14 @@ const chatRoutes =
     require('./routes/chat.routes');
 
 const app = express();
-
-app.use(
-    cors({
-        origin: 'http://localhost:4200',
-        credentials: true,
-        exposedHeaders: [
-            'X-Access-Token',
-            'X-Refresh-Token'
-        ]
-    })
-);
+app.use(cors({
+  origin: [
+    'http://localhost:4200',
+    'https://frontend-git-main-giri22.vercel.app',
+    'https://frontend-giri22.vercel.app'
+  ],
+  credentials: true
+}));
 app.use(express.json());
 app.use(cookieParser());
 app.use(

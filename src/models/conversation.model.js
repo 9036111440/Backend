@@ -29,6 +29,11 @@ const messageSchema = new mongoose.Schema(
             fileUrl: {
                 type: String
             }
+        },
+
+        pdfContext: {
+            type: String,
+            default: null
         }
     },
     {

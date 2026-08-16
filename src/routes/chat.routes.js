@@ -34,34 +34,34 @@ router.post(
 
         try {
             const {
-    extractPdfText
-} = require('../services/pdf.service');
+                extractPdfText
+            } = require('../services/pdf.service');
 
-let pdfText = '';
-const file = req.file;
+            let pdfText = '';
+            const file = req.file;
 
-if (
-    file &&
-    file.mimetype === 'application/pdf'
-) {
+            if (
+                file &&
+                file.mimetype === 'application/pdf'
+            ) {
 
-    const result =
-        await extractPdfText(
-            file.path
-        );
+                const result =
+                    await extractPdfText(
+                        file.path
+                    );
 
-    pdfText = result.text;
-    fs.unlinkSync(file.path);
+                pdfText = result.text;
+                // fs.unlinkSync(file.path);
 
-    console.log(
-        `PDF extracted: ${result.pages} pages`
-    );
+                console.log(
+                    `PDF extracted: ${result.pages} pages`
+                );
 
-    console.log(
-        `Extracted characters: ${pdfText.length}`
-    );
+                console.log(
+                    `Extracted characters: ${pdfText.length}`
+                );
 
-}
+            }
 
             const userId = '6a7fe149a5a74971d2200e10'
 
@@ -71,10 +71,6 @@ if (
 
             const message =
                 req.body.message?.trim();
-
-
-            // const file =
-            //     req.file;
 
 
             if (!message && !file) {
@@ -165,6 +161,20 @@ if (
             }
 
 
+            // Store extracted PDF text on the message
+            // so it persists in the conversation and
+            // can be reused for follow-up questions
+            if (
+                file &&
+                file.mimetype === 'application/pdf' &&
+                pdfText
+            ) {
+
+                userMessage.pdfContext = pdfText;
+
+            }
+
+
             conversation.messages.push(
                 userMessage
             );
@@ -173,60 +183,87 @@ if (
             // -------------------------
             // Generate AI response
             // -------------------------
-let aiResponse;
+            let aiResponse;
 
-if (
-    file &&
-    file.mimetype === 'application/pdf'
-) {
+            if (
+                file &&
+                file.mimetype === 'application/pdf'
+            ) {
 
-    aiResponse =
-        await generatePdfResponse(
-            pdfText,
-            message
-        );
+                aiResponse =
+                    await generatePdfResponse(
+                        pdfText,
+                        message
+                    );
 
-}
-else if (
-    file &&
-    file.mimetype.startsWith('image/')
-) {
+            }
+            else if (
+                file &&
+                file.mimetype.startsWith('image/')
+            ) {
 
-    const fs = require('fs');
+                const fs = require('fs');
 
-    const imageBuffer =
-        fs.readFileSync(file.path);
+                const imageBuffer =
+                    fs.readFileSync(file.path);
 
-    const imageBase64 =
-        imageBuffer.toString('base64');
+                const imageBase64 =
+                    imageBuffer.toString('base64');
 
-    aiResponse =
-        await generateImageResponse(
-            message,
-            imageBase64,
-            file.mimetype
-        );
+                aiResponse =
+                    await generateImageResponse(
+                        message,
+                        imageBase64,
+                        file.mimetype
+                    );
 
-}
-else {
+            }
+            else {
 
-    const groqMessages =
-        conversation.messages.map(
-            msg => ({
+                // Look for the most recent PDF context
+                // stored in this conversation, so follow-up
+                // questions can still reference the PDF
+                // without re-uploading it
+                const pdfMessage =
+                    [...conversation.messages]
+                        .reverse()
+                        .find(msg => msg.pdfContext);
 
-                role: msg.role,
+                const groqMessages = [];
 
-                content: msg.content
+                if (pdfMessage) {
 
-            })
-        );
+                    groqMessages.push({
 
-    aiResponse =
-        await generateTextResponse(
-            groqMessages
-        );
+                        role: 'system',
 
-}
+                        content:
+                            `The user previously uploaded a PDF document. Use the following content to answer questions when relevant. If the question is unrelated to the PDF, answer normally.\n\nPDF CONTENT:\n\n${pdfMessage.pdfContext}`
+
+                    });
+
+                }
+
+                groqMessages.push(
+
+                    ...conversation.messages.map(
+                        msg => ({
+
+                            role: msg.role,
+
+                            content: msg.content
+
+                        })
+                    )
+
+                );
+
+                aiResponse =
+                    await generateTextResponse(
+                        groqMessages
+                    );
+
+            }
 
 
             // -------------------------
@@ -295,7 +332,7 @@ router.get(
                 await Conversation
                     .find({
                         userId: '6a7fe149a5a74971d2200e10'
-                            // req.user.userId || 1000
+                        // req.user.userId || 1000
                     })
                     .sort({
                         updatedAt: -1
@@ -357,7 +394,7 @@ router.get(
                         req.params.id,
 
                     userId: '6a7fe149a5a74971d2200e10'
-                        // req.user.userId || 1000
+                    // req.user.userId || 1000
 
                 });
 

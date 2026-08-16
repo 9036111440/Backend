@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
+const nodemailer = require('nodemailer');
 
 require('dotenv').config();
 
@@ -13,7 +14,17 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
+// Gmail transporter
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    }
+});
 
+// Temporary OTP storage
+const otpStore = new Map();
 
 // MongoDB
 mongoose
@@ -143,7 +154,14 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
 });
-
+//checking the connection to gmail
+transporter.verify((error, success) => {
+    if (error) {
+        console.error('❌ Gmail connection failed:', error.message);
+    } else {
+        console.log('✅ Gmail is ready to send emails');
+    }
+});
 
 app.listen(PORT, () => {
 

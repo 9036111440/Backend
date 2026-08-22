@@ -10,6 +10,9 @@ const authenticateUser =
 const User =
     require('../models/user.model');
 
+const AiUsage =
+    require('../models/ai-usage.model');
+
 const {
     generateTextResponse,
     generateImageResponse,
@@ -66,7 +69,7 @@ router.post(
 
             }
 
-            const userId = '6a815adb619aefa5cee162a6'
+            const userId = '6a89adb932fa4c587cdc34f0'
             const user = await User.findById(userId);
 
 if (!user) {
@@ -240,17 +243,28 @@ if (!user) {
             // Generate AI response
             // -------------------------
             let aiResponse;
+            let aiUsage;
+            let aiModel;
 
             if (
                 file &&
                 file.mimetype === 'application/pdf'
             ) {
 
-                aiResponse =
-                    await generatePdfResponse(
-                        pdfText,
-                        message
-                    );
+            const pdfResult =
+                await generatePdfResponse(
+                    pdfText,
+                    message
+                );
+
+            aiResponse =
+                pdfResult.content;
+
+            aiUsage =
+                pdfResult.usage;
+
+            aiModel =
+                pdfResult.model;
 
             }
             else if (
@@ -266,12 +280,21 @@ if (!user) {
                 const imageBase64 =
                     imageBuffer.toString('base64');
 
-                aiResponse =
+                const imageResult =
                     await generateImageResponse(
                         message,
                         imageBase64,
                         file.mimetype
                     );
+
+                aiResponse =
+                    imageResult.content;
+
+                aiUsage =
+                    imageResult.usage;
+
+                aiModel =
+                    imageResult.model;
 
             }
             else {
@@ -314,28 +337,95 @@ if (!user) {
 
                 );
 
-                aiResponse =
+                const textResult =
                     await generateTextResponse(
                         groqMessages
                     );
 
-            }
+                aiResponse =
+                    textResult.content;
+
+                aiUsage =
+                    textResult.usage;
+
+                aiModel =
+                    textResult.model;
+
+                            }
 
 
             // -------------------------
-            // Save AI response
-            // -------------------------
+// Save AI response
+// -------------------------
 
-            conversation.messages.push({
+conversation.messages.push({
 
-                role: 'assistant',
+    role: 'assistant',
 
-                content: aiResponse
+    content:
+        aiResponse
 
-            });
+});
 
 
-            await conversation.save();
+// -------------------------
+// Save AI usage
+// -------------------------
+
+if (aiUsage) {
+
+    await AiUsage.create({
+
+        userId,
+
+        conversationId:
+            conversation._id,
+
+        model:
+            aiModel,
+
+        promptTokens:
+            aiUsage.prompt_tokens || 0,
+
+        completionTokens:
+            aiUsage.completion_tokens || 0,
+
+        totalTokens:
+            aiUsage.total_tokens || 0
+
+    });
+
+}
+
+            // Save conversation
+await conversation.save();
+
+
+// Save AI usage
+if (aiUsage) {
+
+    await AiUsage.create({
+
+        userId,
+
+        conversationId:
+            conversation._id,
+
+        model:
+            aiModel,
+
+        promptTokens:
+            aiUsage.prompt_tokens || 0,
+
+        completionTokens:
+            aiUsage.completion_tokens || 0,
+
+        totalTokens:
+            aiUsage.total_tokens || 0
+
+    });
+
+}
 
 
             return res.status(200).json({
@@ -387,7 +477,7 @@ router.get(
             const conversations =
                 await Conversation
                     .find({
-                        userId: '6a815adb619aefa5cee162a6'
+                        userId: '6a89adb932fa4c587cdc34f0'
                         // req.user.userId || 1000
                     })
                     .sort({
@@ -449,7 +539,7 @@ router.get(
                     _id:
                         req.params.id,
 
-                    userId: '6a815adb619aefa5cee162a6'
+                    userId: '6a89adb932fa4c587cdc34f0'
                     // req.user.userId || 1000
 
                 });

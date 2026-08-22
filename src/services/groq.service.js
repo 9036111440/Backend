@@ -4,15 +4,20 @@ const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY
 });
 
+const TEXT_MODEL = 'openai/gpt-oss-20b';
+const IMAGE_MODEL = 'qwen/qwen3.6-27b';
 
-const generateTextResponse = async (
-    messages
-) => {
+
+// =====================================================
+// NORMAL TEXT CHAT
+// =====================================================
+
+const generateTextResponse = async (messages) => {
 
     const completion =
         await groq.chat.completions.create({
 
-            model: 'llama-3.3-70b-versatile',
+            model: TEXT_MODEL,
 
             messages,
 
@@ -23,62 +28,27 @@ const generateTextResponse = async (
         });
 
 
-    return completion
-        .choices[0]
-        .message
-        .content;
+    return {
+
+        content:
+            completion
+                .choices[0]
+                .message
+                .content,
+
+        usage:
+            completion.usage,
+
+        model:
+            TEXT_MODEL
+
+    };
 };
 
-const generateImageResponse = async (
-    text,
-    imageBase64,
-    mimeType
-) => {
 
-    const completion =
-        await groq.chat.completions.create({
-
-            model: 'qwen/qwen3.6-27b',
-
-            messages: [
-                {
-                    role: 'user',
-
-                    content: [
-
-                        {
-                            type: 'text',
-
-                            text:
-                                text ||
-                                'Describe this image.'
-                        },
-
-                        {
-                            type: 'image_url',
-
-                            image_url: {
-                                url:
-                                    `data:${mimeType};base64,${imageBase64}`
-                            }
-                        }
-
-                    ]
-                }
-            ],
-
-            temperature: 0.7,
-
-            max_completion_tokens: 2048
-
-        });
-
-
-    return completion
-        .choices[0]
-        .message
-        .content;
-};
+// =====================================================
+// PDF CHAT
+// =====================================================
 
 const generatePdfResponse = async (
     pdfText,
@@ -88,8 +58,7 @@ const generatePdfResponse = async (
     const completion =
         await groq.chat.completions.create({
 
-            model:
-                'llama-3.3-70b-versatile',
+            model: TEXT_MODEL,
 
             messages: [
 
@@ -99,12 +68,11 @@ const generatePdfResponse = async (
                     content:
                         `You are a helpful AI assistant.
 
-Answer the user's question using the provided PDF content.
+Answer the user's question using ONLY the provided PDF content.
 
 Rules:
-- Use only information available in the PDF.
-- If the answer is not available in the PDF, say that you could not find it.
 - Do not invent information.
+- If the answer is not present in the PDF, say you could not find it.
 - Give a clear and concise answer.`
                 },
 
@@ -130,20 +98,103 @@ ${question}`
         });
 
 
-    return completion
-        .choices[0]
-        .message
-        .content;
+    return {
+
+        content:
+            completion
+                .choices[0]
+                .message
+                .content,
+
+        usage:
+            completion.usage,
+
+        model:
+            TEXT_MODEL
+
+    };
+};
+
+
+// =====================================================
+// IMAGE CHAT
+// =====================================================
+
+const generateImageResponse = async (
+    message,
+    imageBase64,
+    mimeType
+) => {
+
+    const completion =
+        await groq.chat.completions.create({
+
+            model: IMAGE_MODEL,
+
+            messages: [
+
+                {
+                    role: 'user',
+
+                    content: [
+
+                        {
+                            type: 'text',
+
+                            text:
+                                message ||
+                                'Describe this image.'
+                        },
+
+                        {
+                            type: 'image_url',
+
+                            image_url: {
+
+                                url:
+                                    `data:${mimeType};base64,${imageBase64}`
+
+                            }
+
+                        }
+
+                    ]
+
+                }
+
+            ],
+
+            temperature: 0.7,
+
+            max_completion_tokens: 2048
+
+        });
+
+
+    return {
+
+        content:
+            completion
+                .choices[0]
+                .message
+                .content,
+
+        usage:
+            completion.usage,
+
+        model:
+            IMAGE_MODEL
+
+    };
 };
 
 
 module.exports = {
+
     generateTextResponse,
-    generateImageResponse,
-    generatePdfResponse
+
+    generatePdfResponse,
+
+    generateImageResponse
+
 };
-
-
-// module.exports = {
-//     generateTextResponse
-// };

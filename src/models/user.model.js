@@ -26,16 +26,25 @@ const userSchema = new mongoose.Schema(
             type: String,
             required: true
         },
-            plan: {
-        type: String,
-        enum: ['demo', 'pro'],
-        default: 'demo'
-    },
+        plan: {
+            type: String,
+            enum: ['demo', 'pro'],
+            default: 'demo'
+        },
 
-    proActivatedAt: {
-        type: Date,
-        default: null
-    }
+        proActivatedAt: {
+            type: Date,
+            default: null
+        },
+        role: {
+            type: String,
+            enum: ['user', 'admin'],
+            default: 'user'
+        },
+        lastLoginAt: {
+            type: Date,
+            default: null
+        }
     },
     {
         timestamps: true

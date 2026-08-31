@@ -15,10 +15,18 @@ const paymentRoutes =
     require('./routes/payment.routes');
 
 
-
+const {
+    connectRedis
+} = require('./services/redis.service');
 const User = require('./models/user.model');
 const EmailOtp = require('./models/otp.model');
 const { sendOtpEmail } = require('./services/email.service');
+const {
+    generateOtp,
+    saveOtp,
+    verifyOtp
+} =
+    require('./services/email-otp.service');
 
 const cookieParser = require('cookie-parser');
 
@@ -251,243 +259,361 @@ app.post('/api/auth/register', async (req, res) => {
 
 });
 
-app.post('/api/auth/send-otp', async (req, res) => {
+// =============================================
+// SEND OTP
+// =============================================
 
-    try {
+app.post(
+    '/api/auth/send-otp',
+    async (req, res) => {
 
-        const { email } = req.body;
+        try {
 
-        // Required validation
-        if (!email) {
-
-            return res.status(400).json({
-                message: 'Email is required'
-            });
-
-        }
-
-        const normalizedEmail = email.toLowerCase().trim();
+            const {
+                email
+            } = req.body;
 
 
-        // Validate email format
-        const emailRegex =
-            /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            // =================================
+            // VALIDATE EMAIL
+            // =================================
 
-        if (!emailRegex.test(normalizedEmail)) {
+            if (!email) {
 
-            return res.status(400).json({
-                message: 'Please provide a valid email'
-            });
+                return res.status(400).json({
 
-        }
+                    message:
+                        'Email is required'
 
+                });
 
-        // Check if email already registered
-        const existingUser = await User.findOne({
-            email: normalizedEmail
-        });
-
-        if (existingUser) {
-
-            return res.status(409).json({
-                message: 'Email already registered'
-            });
-
-        }
+            }
 
 
-        // Generate 6 digit OTP
-        const otp = Math.floor(
-            100000 + Math.random() * 900000
-        ).toString();
+            // =================================
+            // NORMALIZE EMAIL
+            // =================================
+
+            const normalizedEmail =
+                email.toLowerCase().trim();
 
 
-        // Hash OTP
-        const hashedOtp = await bcrypt.hash(otp, 10);
+            // =================================
+            // VALIDATE EMAIL FORMAT
+            // =================================
+
+            const emailRegex =
+                /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 
-        // Remove previous OTP
-        await EmailOtp.deleteMany({
-            email: normalizedEmail
-        });
+            if (
+                !emailRegex.test(
+                    normalizedEmail
+                )
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Please provide a valid email'
+
+                });
+
+            }
 
 
-        // OTP expires in 5 minutes
-        const expiresAt = new Date(
-            Date.now() + 5 * 60 * 1000
-        );
+            // =================================
+            // CHECK EXISTING USER
+            // =================================
+
+            const existingUser =
+                await User.findOne({
+
+                    email:
+                        normalizedEmail
+
+                });
 
 
-        // Save OTP
-        await EmailOtp.create({
-            email: normalizedEmail,
-            otp: hashedOtp,
-            expiresAt
-        });
+            if (existingUser) {
+
+                return res.status(409).json({
+
+                    message:
+                        'Email already registered'
+
+                });
+
+            }
 
 
-        // Send email
-        await sendOtpEmail(
-            normalizedEmail,
-            otp
-        );
+            // =================================
+            // GENERATE OTP
+            // =================================
+
+            const otp =
+                generateOtp();
 
 
-        res.status(200).json({
-            message: 'OTP sent successfully'
-        });
+            console.log(
+                `📧 OTP generated for ${normalizedEmail}`
+            );
 
 
-    } catch (error) {
+            // =================================
+            // SAVE OTP IN REDIS
+            // TTL = 5 MINUTES
+            // =================================
 
-        console.error('Send OTP error:', error);
-
-        res.status(500).json({
-            message: 'Failed to send OTP'
-        });
-
-    }
-
-});
-
-app.post('/api/auth/verify-otp', async (req, res) => {
-
-    try {
-
-        const {
-            email,
-            otp
-        } = req.body;
+            await saveOtp(
+                normalizedEmail,
+                otp
+            );
 
 
-        if (!email || !otp) {
-
-            return res.status(400).json({
-                message: 'Email and OTP are required'
-            });
-
-        }
+            console.log(
+                '✅ OTP stored in Redis for 5 minutes'
+            );
 
 
-        const normalizedEmail =
-            email.toLowerCase().trim();
+            // =================================
+            // SEND EMAIL
+            // =================================
+
+            await sendOtpEmail(
+                normalizedEmail,
+                otp
+            );
 
 
-        // Find OTP
-        const otpRecord = await EmailOtp
-            .findOne({
-                email: normalizedEmail
-            })
-            .sort({
-                createdAt: -1
-            });
+            console.log(
+                `✅ OTP email sent to ${normalizedEmail}`
+            );
 
 
-        if (!otpRecord) {
+            // =================================
+            // RESPONSE
+            // =================================
 
-            return res.status(400).json({
-                message: 'OTP not found. Please request a new OTP.'
-            });
+            return res.status(200).json({
 
-        }
-
-
-        // Check expiry
-        if (
-            new Date() > otpRecord.expiresAt
-        ) {
-
-            await EmailOtp.deleteOne({
-                _id: otpRecord._id
-            });
-
-            return res.status(400).json({
-                message: 'OTP has expired. Please request a new OTP.'
-            });
-
-        }
-
-
-        // Maximum attempts
-        if (otpRecord.attempts >= 5) {
-
-            await EmailOtp.deleteOne({
-                _id: otpRecord._id
-            });
-
-            return res.status(429).json({
                 message:
-                    'Too many incorrect attempts. Please request a new OTP.'
+                    'OTP sent successfully'
+
             });
 
         }
 
 
-        // Compare OTP
-        const isValidOtp =
-            await bcrypt.compare(
-                otp,
-                otpRecord.otp
+        catch (error) {
+
+            console.error(
+                '❌ Send OTP error:',
+                error
             );
 
 
-        if (!isValidOtp) {
+            return res.status(500).json({
 
-            otpRecord.attempts += 1;
+                message:
+                    'Failed to send OTP'
 
-            await otpRecord.save();
-
-            return res.status(400).json({
-                message: 'Invalid OTP'
             });
 
         }
-
-
-        // OTP verified
-        await EmailOtp.deleteOne({
-            _id: otpRecord._id
-        });
-
-
-        // Generate verification token
-        const verificationToken =
-            jwt.sign(
-                {
-                    email: normalizedEmail,
-                    purpose: 'email-verification'
-                },
-                process.env.JWT_SECRET,
-                {
-                    expiresIn: '15m'
-                }
-            );
-
-
-        res.status(200).json({
-
-            message:
-                'Email verified successfully',
-
-            verificationToken
-
-        });
-
-
-    } catch (error) {
-
-        console.error(
-            'Verify OTP error:',
-            error
-        );
-
-        res.status(500).json({
-            message: 'Failed to verify OTP'
-        });
 
     }
+);
 
-});
+// =============================================
+// VERIFY OTP
+// =============================================
+
+app.post(
+    '/api/auth/verify-otp',
+    async (req, res) => {
+
+        try {
+
+            const {
+                email,
+                otp
+            } = req.body;
+
+
+            // =================================
+            // REQUIRED VALIDATION
+            // =================================
+
+            if (!email || !otp) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Email and OTP are required'
+
+                });
+
+            }
+
+
+            // =================================
+            // NORMALIZE EMAIL
+            // =================================
+
+            const normalizedEmail =
+                email.toLowerCase().trim();
+
+
+            // =================================
+            // VALIDATE OTP FORMAT
+            // =================================
+
+            if (
+                !/^\d{6}$/.test(
+                    otp.toString()
+                )
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'OTP must be a 6-digit number'
+
+                });
+
+            }
+
+
+            // =================================
+            // VERIFY USING REDIS
+            // =================================
+
+            const result =
+                await verifyOtp(
+                    normalizedEmail,
+                    otp.toString()
+                );
+
+
+            // =================================
+            // OTP EXPIRED
+            // =================================
+
+            if (
+                result.reason ===
+                'OTP_EXPIRED'
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'OTP has expired. Please request a new OTP.'
+
+                });
+
+            }
+
+
+            // =================================
+            // MAX ATTEMPTS
+            // =================================
+
+            if (
+                result.reason ===
+                'MAX_ATTEMPTS'
+            ) {
+
+                return res.status(429).json({
+
+                    message:
+                        'Too many incorrect attempts. Please request a new OTP.'
+
+                });
+
+            }
+
+
+            // =================================
+            // INVALID OTP
+            // =================================
+
+            if (
+                result.reason ===
+                'INVALID_OTP'
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        `Invalid OTP. ${result.attemptsLeft} attempts remaining.`
+
+                });
+
+            }
+
+
+            // =================================
+            // OTP VERIFIED
+            // =================================
+
+            const verificationToken =
+                jwt.sign(
+
+                    {
+                        email:
+                            normalizedEmail,
+
+                        purpose:
+                            'email-verification'
+
+                    },
+
+                    process.env.JWT_SECRET,
+
+                    {
+                        expiresIn:
+                            '15m'
+                    }
+
+                );
+
+
+            // =================================
+            // SUCCESS
+            // =================================
+
+            return res.status(200).json({
+
+                message:
+                    'Email verified successfully',
+
+                verificationToken
+
+            });
+
+        }
+
+
+        catch (error) {
+
+            console.error(
+                '❌ Verify OTP error:',
+                error
+            );
+
+
+            return res.status(500).json({
+
+                message:
+                    'Failed to verify OTP'
+
+            });
+
+        }
+
+    }
+);
 
 app.post('/api/auth/login', async (req, res) => {
 
@@ -647,6 +773,46 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-});
+const startServer = async () => {
+
+    try {
+
+        // =================================
+        // CONNECT REDIS
+        // =================================
+
+        await connectRedis();
+
+
+        // =================================
+        // START SERVER
+        // =================================
+
+        app.listen(
+            PORT,
+            () => {
+
+                console.log(
+                    `🚀 Server running on http://localhost:${PORT}`
+                );
+
+            }
+        );
+
+    } catch (error) {
+
+        console.error(
+            '❌ Server startup failed:',
+            error
+        );
+
+        process.exit(1);
+
+    }
+
+};
+
+
+startServer();
+
+startServer();

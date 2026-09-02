@@ -11,6 +11,9 @@ const User =
 const Payment =
     require('../models/payment.model');
 
+    const authenticateUser =
+        require('../middleware/auth.middleware');
+
 
 const router =
     express.Router();
@@ -22,15 +25,17 @@ const router =
 
 router.post(
     '/create-order',
+    authenticateUser,
 
     async (req, res) => {
 
         try {
 
             // const userId =
-            //     process.env.TEST_USER_ID;
+                process.env.TEST_USER_ID;
 
-                const userId = "6a89adb932fa4c587cdc34f0"
+                const userId =req.user.userId
+
 
 
             // --------------------------------
@@ -379,13 +384,13 @@ router.post(
 
 router.get(
     '/plan',
+    authenticateUser,
 
     async (req, res) => {
 
         try {
 
-            const userId =
-                process.env.TEST_USER_ID;
+            const userId = req.user.userId
 
 
             const user =

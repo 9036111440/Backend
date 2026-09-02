@@ -33,7 +33,7 @@ const upload = multer({
 
 router.post(
     '/message',
-    // authenticateUser,
+    authenticateUser,
     upload.single('file'),
 
     async (req, res) => {
@@ -69,7 +69,8 @@ router.post(
 
             }
 
-            const userId = '6a89adb932fa4c587cdc34f0'
+            const userId = req.user.userId
+
             const user = await User.findById(userId);
 
 if (!user) {
@@ -468,17 +469,18 @@ if (aiUsage) {
 );
 router.get(
     '/conversations',
-    // authenticateUser,
+    authenticateUser,
 
     async (req, res) => {
+        console.log(req.user)
 
         try {
 
             const conversations =
                 await Conversation
                     .find({
-                        userId: '6a89adb932fa4c587cdc34f0'
-                        // req.user.userId || 1000
+                        // userId: '6a89adb932fa4c587cdc34f0'
+                       userId : req.user.userId
                     })
                     .sort({
                         updatedAt: -1
@@ -527,7 +529,7 @@ router.get(
 );
 router.get(
     '/conversations/:id',
-    // authenticateUser,
+    authenticateUser,
 
     async (req, res) => {
 
@@ -539,8 +541,8 @@ router.get(
                     _id:
                         req.params.id,
 
-                    userId: '6a89adb932fa4c587cdc34f0'
-                    // req.user.userId || 1000
+                    // userId: '6a89adb932fa4c587cdc34f0'
+                    userId: req.user.userId
 
                 });
 

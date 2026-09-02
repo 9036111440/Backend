@@ -9,12 +9,12 @@ const requireAdmin = async (
 
     try {
 
-        // const user =
-        //     await User.findById(
-        //         req.user.userId
-        //     ).select('role');
+        const user =
+            await User.findById(
+                req.user.userId
+            ).select('role');
 
-        const user =  '6a89adb932fa4c587cdc34f0'
+        // const user =  '6a89adb932fa4c587cdc34f0'
 
         if (!user) {
 

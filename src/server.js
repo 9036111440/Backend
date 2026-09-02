@@ -773,6 +773,70 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 
+// =============================================
+// LOGOUT
+// =============================================
+
+app.post(
+    '/api/auth/logout',
+    (req, res) => {
+
+        try {
+
+            // =================================
+            // CLEAR REFRESH TOKEN COOKIE
+            // =================================
+
+            res.clearCookie(
+                'refreshToken',
+                {
+                    httpOnly: true,
+
+                    secure:
+                        process.env.NODE_ENV ===
+                        'production',
+
+                    sameSite:
+                        process.env.NODE_ENV ===
+                        'production'
+                            ? 'none'
+                            : 'lax'
+                }
+            );
+
+
+            // =================================
+            // RESPONSE
+            // =================================
+
+            return res.status(200).json({
+
+                message:
+                    'Logout successful'
+
+            });
+
+        }
+        catch (error) {
+
+            console.error(
+                'Logout error:',
+                error
+            );
+
+            return res.status(500).json({
+
+                message:
+                    'Logout failed'
+
+            });
+
+        }
+
+    }
+);
+
+
 const startServer = async () => {
 
     try {

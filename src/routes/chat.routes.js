@@ -21,6 +21,11 @@ const {
 
 const MessageFeedback =
     require('../models/message-feedback.model');
+    
+const {
+    generateConversationPdf
+} =
+    require('../services/conversation-pdf.service');
 
 const path =
     require('path');
@@ -363,122 +368,45 @@ router.post(
 
             }
 
+// -------------------------
+// Save AI response
+// -------------------------
 
-            // -------------------------
-            // Save AI response
-            // -------------------------
+conversation.messages.push({
+    role: 'assistant',
+    content: aiResponse
+});
 
-            conversation.messages.push({
+// -------------------------
+// Save AI usage
+// -------------------------
 
-                role: 'assistant',
+if (aiUsage) {
+    await AiUsage.create({
+        userId,
+        conversationId: conversation._id,
+        model: aiModel,
+        promptTokens: aiUsage.prompt_tokens || 0,
+        completionTokens: aiUsage.completion_tokens || 0,
+        totalTokens: aiUsage.total_tokens || 0
+    });
+}
 
-                content:
-                    aiResponse
+// Save conversation
+await conversation.save();
 
-            });
+const savedAssistantMessage =
+    conversation.messages[conversation.messages.length - 1];
 
-
-            // -------------------------
-            // Save AI usage
-            // -------------------------
-
-            if (aiUsage) {
-
-                await AiUsage.create({
-
-                    userId,
-
-                    conversationId:
-                        conversation._id,
-
-                    model:
-                        aiModel,
-
-                    promptTokens:
-                        aiUsage.prompt_tokens || 0,
-
-                    completionTokens:
-                        aiUsage.completion_tokens || 0,
-
-                    totalTokens:
-                        aiUsage.total_tokens || 0
-
-                });
-
-            }
-
-            // Save conversation
-            await conversation.save();
-
-
-            // Save AI usage
-            if (aiUsage) {
-
-                await AiUsage.create({
-
-                    userId,
-
-                    conversationId:
-                        conversation._id,
-
-                    model:
-                        aiModel,
-
-                    promptTokens:
-                        aiUsage.prompt_tokens || 0,
-
-                    completionTokens:
-                        aiUsage.completion_tokens || 0,
-
-                    totalTokens:
-                        aiUsage.total_tokens || 0
-
-                });
-
-            }
-
-            const assistantMessage = {
-
-                role: 'assistant',
-
-                content:
-                    aiResponse
-
-            };
-
-            conversation.messages.push(
-                assistantMessage
-            );
-
-            await conversation.save();
-
-
-            const savedAssistantMessage =
-                conversation.messages[
-                conversation.messages.length - 1
-                ];
-
-            return res.status(200).json({
-
-                conversationId:
-                    conversation._id,
-
-                userMessage,
-
-                assistantMessage: {
-
-                    _id:
-                        savedAssistantMessage._id,
-
-                    role:
-                        savedAssistantMessage.role,
-
-                    content:
-                        savedAssistantMessage.content
-
-                }
-
-            });
+return res.status(200).json({
+    conversationId: conversation._id,
+    userMessage,
+    assistantMessage: {
+        _id: savedAssistantMessage._id,
+        role: savedAssistantMessage.role,
+        content: savedAssistantMessage.content
+    }
+});
 
 
         } catch (error) {
@@ -1141,5 +1069,110 @@ router.post(
     }
 );
 
+
+// =====================================================
+// EXPORT CONVERSATION AS PDF
+// =====================================================
+
+router.get(
+    '/conversations/:id/pdf',
+
+    authenticateUser,
+
+    async (
+        req,
+        res
+    ) => {
+
+        try {
+
+            const conversation =
+                await Conversation.findOne({
+                    _id: req.params.id,
+
+                    // IMPORTANT:
+                    // Replace with req.user.userId
+                    // when authentication is enabled.
+                    userId:
+                        req.user?.userId
+                });
+
+
+            if (!conversation) {
+
+                return res.status(404).json({
+
+                    message:
+                        'Conversation not found'
+
+                });
+
+            }
+
+
+            const pdfBuffer =
+                await generateConversationPdf(
+                    conversation
+                );
+
+
+            const safeTitle =
+                (
+                    conversation.title ||
+                    'conversation'
+                )
+                    .replace(
+                        /[^a-z0-9]/gi,
+                        '-'
+                    )
+                    .replace(
+                        /-+/g,
+                        '-'
+                    )
+                    .toLowerCase();
+
+
+            res.setHeader(
+                'Content-Type',
+                'application/pdf'
+            );
+
+
+            res.setHeader(
+                'Content-Disposition',
+                `attachment; filename="${safeTitle}.pdf"`
+            );
+
+
+            res.setHeader(
+                'Content-Length',
+                pdfBuffer.length
+            );
+
+
+            return res.send(
+                pdfBuffer
+            );
+
+
+        } catch (error) {
+
+            console.error(
+                'Conversation PDF export error:',
+                error
+            );
+
+
+            return res.status(500).json({
+
+                message:
+                    'Failed to generate conversation PDF'
+
+            });
+
+        }
+
+    }
+);
 
 module.exports = router;

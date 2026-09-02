@@ -12,37 +12,178 @@ const IMAGE_MODEL = 'qwen/qwen3.6-27b';
 // NORMAL TEXT CHAT
 // =====================================================
 
+// =====================================================
+// NORMAL TEXT CHAT
+// =====================================================
+
 const generateTextResponse = async (messages) => {
 
-    const completion =
-        await groq.chat.completions.create({
+    const MAX_HISTORY_MESSAGES = 8;
 
-            model: TEXT_MODEL,
+    /*
+     * Approximate character limit per message.
+     *
+     * This is intentionally conservative because
+     * Groq's limit is measured in tokens, not characters.
+     */
 
-            messages,
-
-            temperature: 0.7,
-
-            max_tokens: 2048
-
-        });
+    const MAX_MESSAGE_CHARS = 6000;
 
 
-    return {
+    let safeMessages = Array.isArray(messages)
+        ? messages
+        : [];
 
-        content:
-            completion
-                .choices[0]
-                .message
-                .content,
 
-        usage:
-            completion.usage,
+    /*
+     * Preserve system message.
+     */
 
-        model:
-            TEXT_MODEL
+    const systemMessage =
+        safeMessages.find(
+            message =>
+                message.role === 'system'
+        );
 
-    };
+
+    /*
+     * Keep recent conversation only.
+     */
+
+    const conversationMessages =
+        safeMessages
+            .filter(
+                message =>
+                    message.role !== 'system'
+            )
+            .slice(
+                -MAX_HISTORY_MESSAGES
+            );
+
+
+    /*
+     * Trim large messages.
+     */
+
+    const trimmedMessages =
+        conversationMessages.map(
+            message => {
+
+                if (
+                    typeof message.content !==
+                    'string'
+                ) {
+
+                    return message;
+
+                }
+
+
+                if (
+                    message.content.length <=
+                    MAX_MESSAGE_CHARS
+                ) {
+
+                    return message;
+
+                }
+
+
+                return {
+
+                    ...message,
+
+                    content:
+                        message.content.slice(
+                            0,
+                            MAX_MESSAGE_CHARS
+                        ) +
+                        '\n\n[Previous content truncated.]'
+
+                };
+
+            }
+        );
+
+
+    safeMessages = [
+
+        ...(systemMessage
+            ? [systemMessage]
+            : []
+        ),
+
+        ...trimmedMessages
+
+    ];
+
+
+    console.log(
+        'Sending messages to Groq:',
+        safeMessages.length
+    );
+
+
+    try {
+
+        const completion =
+            await groq.chat.completions.create({
+
+                model:
+                    TEXT_MODEL,
+
+                messages:
+                    safeMessages,
+
+                temperature:
+                    0.7,
+
+                max_tokens:
+                    1024
+
+            });
+
+
+        return {
+
+            content:
+                completion
+                    .choices[0]
+                    .message
+                    .content,
+
+            usage:
+                completion.usage,
+
+            model:
+                TEXT_MODEL
+
+        };
+
+    } catch (error) {
+
+        console.error(
+            'Groq text generation error:',
+            error
+        );
+
+
+        if (
+            error?.status === 413 ||
+            error?.code ===
+                'rate_limit_exceeded'
+        ) {
+
+            throw new Error(
+                'AI request is too large. Please start a new chat or shorten your message.'
+            );
+
+        }
+
+        throw error;
+
+    }
+
 };
 
 

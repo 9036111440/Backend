@@ -19,6 +19,15 @@ const {
     generatePdfResponse
 } = require('../services/groq.service');
 
+const MessageFeedback =
+    require('../models/message-feedback.model');
+
+const path =
+    require('path');
+
+const fs =
+    require('fs');
+
 
 const router = express.Router();
 
@@ -73,13 +82,13 @@ router.post(
 
             const user = await User.findById(userId);
 
-if (!user) {
+            if (!user) {
 
-    return res.status(404).json({
-        message: 'User not found'
-    });
+                return res.status(404).json({
+                    message: 'User not found'
+                });
 
-}
+            }
 
             // const userId =
             //     req.user.userId || 1000;
@@ -252,20 +261,20 @@ if (!user) {
                 file.mimetype === 'application/pdf'
             ) {
 
-            const pdfResult =
-                await generatePdfResponse(
-                    pdfText,
-                    message
-                );
+                const pdfResult =
+                    await generatePdfResponse(
+                        pdfText,
+                        message
+                    );
 
-            aiResponse =
-                pdfResult.content;
+                aiResponse =
+                    pdfResult.content;
 
-            aiUsage =
-                pdfResult.usage;
+                aiUsage =
+                    pdfResult.usage;
 
-            aiModel =
-                pdfResult.model;
+                aiModel =
+                    pdfResult.model;
 
             }
             else if (
@@ -352,82 +361,102 @@ if (!user) {
                 aiModel =
                     textResult.model;
 
-                            }
+            }
 
 
             // -------------------------
-// Save AI response
-// -------------------------
+            // Save AI response
+            // -------------------------
 
-conversation.messages.push({
+            conversation.messages.push({
 
-    role: 'assistant',
+                role: 'assistant',
 
-    content:
-        aiResponse
+                content:
+                    aiResponse
 
-});
+            });
 
 
-// -------------------------
-// Save AI usage
-// -------------------------
+            // -------------------------
+            // Save AI usage
+            // -------------------------
 
-if (aiUsage) {
+            if (aiUsage) {
 
-    await AiUsage.create({
+                await AiUsage.create({
 
-        userId,
+                    userId,
 
-        conversationId:
-            conversation._id,
+                    conversationId:
+                        conversation._id,
 
-        model:
-            aiModel,
+                    model:
+                        aiModel,
 
-        promptTokens:
-            aiUsage.prompt_tokens || 0,
+                    promptTokens:
+                        aiUsage.prompt_tokens || 0,
 
-        completionTokens:
-            aiUsage.completion_tokens || 0,
+                    completionTokens:
+                        aiUsage.completion_tokens || 0,
 
-        totalTokens:
-            aiUsage.total_tokens || 0
+                    totalTokens:
+                        aiUsage.total_tokens || 0
 
-    });
+                });
 
-}
+            }
 
             // Save conversation
-await conversation.save();
+            await conversation.save();
 
 
-// Save AI usage
-if (aiUsage) {
+            // Save AI usage
+            if (aiUsage) {
 
-    await AiUsage.create({
+                await AiUsage.create({
 
-        userId,
+                    userId,
 
-        conversationId:
-            conversation._id,
+                    conversationId:
+                        conversation._id,
 
-        model:
-            aiModel,
+                    model:
+                        aiModel,
 
-        promptTokens:
-            aiUsage.prompt_tokens || 0,
+                    promptTokens:
+                        aiUsage.prompt_tokens || 0,
 
-        completionTokens:
-            aiUsage.completion_tokens || 0,
+                    completionTokens:
+                        aiUsage.completion_tokens || 0,
 
-        totalTokens:
-            aiUsage.total_tokens || 0
+                    totalTokens:
+                        aiUsage.total_tokens || 0
 
-    });
+                });
 
-}
+            }
 
+            const assistantMessage = {
+
+                role: 'assistant',
+
+                content:
+                    aiResponse
+
+            };
+
+            conversation.messages.push(
+                assistantMessage
+            );
+
+            await conversation.save();
+
+
+            const savedAssistantMessage =
+                conversation.messages[
+                conversation.messages.length - 1
+                ];
 
             return res.status(200).json({
 
@@ -438,10 +467,14 @@ if (aiUsage) {
 
                 assistantMessage: {
 
-                    role: 'assistant',
+                    _id:
+                        savedAssistantMessage._id,
+
+                    role:
+                        savedAssistantMessage.role,
 
                     content:
-                        aiResponse
+                        savedAssistantMessage.content
 
                 }
 
@@ -480,7 +513,7 @@ router.get(
                 await Conversation
                     .find({
                         // userId: '6a89adb932fa4c587cdc34f0'
-                       userId : req.user.userId
+                        userId: req.user.userId
                     })
                     .sort({
                         updatedAt: -1
@@ -569,6 +602,537 @@ router.get(
 
                 message:
                     'Failed to load conversation'
+
+            });
+
+        }
+
+    }
+);
+
+// ============================================================
+// REGENERATE LAST AI RESPONSE
+// ============================================================
+
+router.post(
+    '/regenerate',
+    authenticateUser,
+
+    // Use your authentication middleware in production.
+    // If you are still temporarily testing locally without
+    // authentication, keep the same userId strategy you
+    // already use in your current chat route.
+    // authenticateUser,
+
+    async (req, res) => {
+
+        try {
+
+            const {
+                conversationId
+            } = req.body;
+
+
+            // ---------------------------------------------
+            // VALIDATION
+            // ---------------------------------------------
+
+            if (!conversationId) {
+
+                return res.status(400).json({
+
+                    message:
+                        'conversationId is required'
+
+                });
+
+            }
+
+
+            /*
+             * IMPORTANT:
+             *
+             * Use the SAME userId logic that your existing
+             * chat route currently uses.
+             *
+             * Production:
+             *
+             * const userId = req.user.userId;
+             *
+             * Local testing without auth:
+             * use your existing test userId.
+             */
+
+            const userId =
+                req.user?.userId;
+
+
+            if (!userId) {
+
+                return res.status(401).json({
+
+                    message:
+                        'Authentication required'
+
+                });
+
+            }
+
+
+            // ---------------------------------------------
+            // FIND CONVERSATION
+            // ---------------------------------------------
+
+            const conversation =
+                await Conversation.findOne({
+
+                    _id:
+                        conversationId,
+
+                    userId
+
+                });
+
+
+            if (!conversation) {
+
+                return res.status(404).json({
+
+                    message:
+                        'Conversation not found'
+
+                });
+
+            }
+
+
+            // ---------------------------------------------
+            // FIND LAST ASSISTANT MESSAGE
+            // ---------------------------------------------
+
+            let lastAssistantIndex = -1;
+
+            for (
+                let i = conversation.messages.length - 1;
+                i >= 0;
+                i--
+            ) {
+
+                if (
+                    conversation.messages[i].role ===
+                    'assistant'
+                ) {
+
+                    lastAssistantIndex = i;
+
+                    break;
+
+                }
+
+            }
+
+
+            if (
+                lastAssistantIndex === -1
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'No AI response available to regenerate'
+
+                });
+
+            }
+
+
+            // ---------------------------------------------
+            // FIND USER MESSAGE BEFORE AI RESPONSE
+            // ---------------------------------------------
+
+            let userMessageIndex = -1;
+
+            for (
+                let i = lastAssistantIndex - 1;
+                i >= 0;
+                i--
+            ) {
+
+                if (
+                    conversation.messages[i].role ===
+                    'user'
+                ) {
+
+                    userMessageIndex = i;
+
+                    break;
+
+                }
+
+            }
+
+
+            if (
+                userMessageIndex === -1
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Unable to find the original user message'
+
+                });
+
+            }
+
+
+            const userMessage =
+                conversation.messages[userMessageIndex];
+
+
+            // ---------------------------------------------
+            // PREPARE GROQ MESSAGES
+            // ---------------------------------------------
+
+            const pdfMessage =
+                [...conversation.messages]
+                    .slice(
+                        0,
+                        userMessageIndex + 1
+                    )
+                    .reverse()
+                    .find(
+                        msg => msg.pdfContext
+                    );
+
+
+            const groqMessages = [];
+
+
+            if (pdfMessage) {
+
+                groqMessages.push({
+
+                    role: 'system',
+
+                    content:
+                        `The user previously uploaded a PDF document. Use the following content to answer questions when relevant. If the question is unrelated to the PDF, answer normally.\n\nPDF CONTENT:\n\n${pdfMessage.pdfContext}`
+
+                });
+
+            }
+
+
+            /*
+             * Only include messages BEFORE the old
+             * assistant response.
+             *
+             * This means the model sees the same
+             * conversation context as before.
+             */
+
+            const messagesBeforeAssistant =
+                conversation.messages
+                    .slice(
+                        0,
+                        lastAssistantIndex
+                    )
+                    .map(
+                        msg => ({
+
+                            role:
+                                msg.role,
+
+                            content:
+                                msg.content
+
+                        })
+                    );
+
+
+            groqMessages.push(
+                ...messagesBeforeAssistant
+            );
+
+
+            // ---------------------------------------------
+            // GENERATE NEW RESPONSE
+            // ---------------------------------------------
+
+            const aiResponse =
+                await generateTextResponse(
+                    groqMessages
+                );
+
+
+            // ---------------------------------------------
+            // REPLACE OLD AI RESPONSE
+            // ---------------------------------------------
+
+            conversation.messages[
+                lastAssistantIndex
+            ].content =
+                aiResponse;
+
+
+            /*
+             * Any previous feedback for this message
+             * should no longer apply because its content
+             * has changed.
+             */
+
+            await MessageFeedback.deleteMany({
+
+                conversationId,
+
+                messageId:
+                    conversation.messages[
+                        lastAssistantIndex
+                    ]._id
+
+            });
+
+
+            await conversation.save();
+
+
+            // ---------------------------------------------
+            // RESPONSE
+            // ---------------------------------------------
+
+            return res.status(200).json({
+
+                conversationId:
+                    conversation._id,
+
+                messageId:
+                    conversation.messages[
+                        lastAssistantIndex
+                    ]._id,
+
+                role:
+                    'assistant',
+
+                content:
+                    aiResponse
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                'Regenerate error:',
+                error
+            );
+
+
+            return res.status(500).json({
+
+                message:
+                    'Failed to regenerate AI response'
+
+            });
+
+        }
+
+    }
+);
+
+// ============================================================
+// AI MESSAGE FEEDBACK
+// ============================================================
+
+router.post(
+    '/feedback',
+
+    authenticateUser,
+
+    async (req, res) => {
+
+        try {
+
+            const {
+                conversationId,
+                messageId,
+                feedback
+            } = req.body;
+
+
+            // ---------------------------------------------
+            // VALIDATION
+            // ---------------------------------------------
+
+            if (
+                !conversationId ||
+                !messageId ||
+                !feedback
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'conversationId, messageId and feedback are required'
+
+                });
+
+            }
+
+
+            if (
+                !['up', 'down'].includes(
+                    feedback
+                )
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Feedback must be up or down'
+
+                });
+
+            }
+
+
+            const userId =
+                req.user?.userId;
+
+
+            if (!userId) {
+
+                return res.status(401).json({
+
+                    message:
+                        'Authentication required'
+
+                });
+
+            }
+
+
+            // ---------------------------------------------
+            // VERIFY CONVERSATION BELONGS TO USER
+            // ---------------------------------------------
+
+            const conversation =
+                await Conversation.findOne({
+
+                    _id:
+                        conversationId,
+
+                    userId
+
+                });
+
+
+            if (!conversation) {
+
+                return res.status(404).json({
+
+                    message:
+                        'Conversation not found'
+
+                });
+
+            }
+
+
+            // ---------------------------------------------
+            // VERIFY MESSAGE EXISTS
+            // ---------------------------------------------
+
+            const message =
+                conversation.messages.id(
+                    messageId
+                );
+
+
+            if (!message) {
+
+                return res.status(404).json({
+
+                    message:
+                        'Message not found'
+
+                });
+
+            }
+
+
+            if (
+                message.role !==
+                'assistant'
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Feedback can only be given to AI messages'
+
+                });
+
+            }
+
+
+            // ---------------------------------------------
+            // UPSERT FEEDBACK
+            // ---------------------------------------------
+
+            const savedFeedback =
+                await MessageFeedback.findOneAndUpdate(
+
+                    {
+                        userId,
+
+                        messageId
+                    },
+
+                    {
+                        $set: {
+
+                            conversationId,
+
+                            feedback
+
+                        }
+
+                    },
+
+                    {
+                        new: true,
+
+                        upsert: true,
+
+                        setDefaultsOnInsert: true
+                    }
+
+                );
+
+
+            return res.status(200).json({
+
+                message:
+                    'Feedback saved successfully',
+
+                feedback:
+                    savedFeedback.feedback
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                'Feedback error:',
+                error
+            );
+
+
+            return res.status(500).json({
+
+                message:
+                    'Failed to save feedback'
 
             });
 

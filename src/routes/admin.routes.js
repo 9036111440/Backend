@@ -9,6 +9,10 @@ const Conversation =
 const Payment =
     require('../models/payment.model');
 
+
+const MessageFeedback =
+    require('../models/message-feedback.model');
+
 const authenticateUser =
     require('../middleware/auth.middleware');
 
@@ -40,7 +44,11 @@ const router =
 
                 totalMessages,
 
-                activeUsers
+                activeUsers,
+
+                totalLikes,
+
+                totalDislikes
 
             ] = await Promise.all([
 
@@ -81,7 +89,15 @@ const router =
 
                     }
 
-                })
+                }),
+
+                 MessageFeedback.countDocuments({
+        feedback: 'up'
+    }),
+
+    MessageFeedback.countDocuments({
+        feedback: 'down'
+    })
 
             ]);
 
@@ -116,6 +132,10 @@ const router =
 
                 totalMessages:
                     totalMessages[0]?.count || 0,
+                
+                totalLikes,
+
+                totalDislikes,
 
                 revenue
 

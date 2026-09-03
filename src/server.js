@@ -11,16 +11,20 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const paymentRoutes =
     require('./routes/payment.routes');
 
 
 const {
-    connectRedis
+    connectRedis,
+     setValue,
+    getValue,
+    deleteValue
 } = require('./services/redis.service');
 const User = require('./models/user.model');
 const EmailOtp = require('./models/otp.model');
-const { sendOtpEmail } = require('./services/email.service');
+const { sendOtpEmail ,  sendPasswordResetOtpEmail } = require('./services/email.service');
 const {
     generateOtp,
     saveOtp,
@@ -876,7 +880,620 @@ const startServer = async () => {
 
 };
 
+// =====================================================
+// FORGOT PASSWORD - SEND OTP
+// =====================================================
 
-startServer();
+app.post(
+    '/api/auth/forgot-password',
+    async (req, res) => {
+
+        try {
+
+            const {
+                email
+            } = req.body;
+
+
+            // -----------------------------
+            // Required validation
+            // -----------------------------
+
+            if (!email) {
+
+                return res.status(400).json({
+                    message:
+                        'Email is required'
+                });
+
+            }
+
+
+            // -----------------------------
+            // Normalize email
+            // -----------------------------
+
+            const normalizedEmail =
+                email
+                    .toLowerCase()
+                    .trim();
+
+
+            // -----------------------------
+            // Validate email format
+            // -----------------------------
+
+            const emailRegex =
+                /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+
+            if (
+                !emailRegex.test(
+                    normalizedEmail
+                )
+            ) {
+
+                return res.status(400).json({
+                    message:
+                        'Please provide a valid email'
+                });
+
+            }
+
+
+            // -----------------------------
+            // Find user
+            // -----------------------------
+
+            const user =
+                await User.findOne({
+                    email:
+                        normalizedEmail
+                });
+
+
+            /*
+             * Do not reveal whether an email
+             * exists or not.
+             *
+             * This avoids account enumeration.
+             */
+
+            if (!user) {
+
+                return res.status(200).json({
+
+                    message:
+                        'If the email is registered, a password reset OTP has been sent.'
+
+                });
+
+            }
+
+
+            // -----------------------------
+            // Generate 6-digit OTP
+            // -----------------------------
+
+            const otp =
+                crypto
+                    .randomInt(
+                        100000,
+                        1000000
+                    )
+                    .toString();
+
+
+            // -----------------------------
+            // Hash OTP
+            // -----------------------------
+
+            const hashedOtp =
+                await bcrypt.hash(
+                    otp,
+                    10
+                );
+
+
+            // -----------------------------
+            // Redis key
+            // -----------------------------
+
+            const redisKey =
+                `password-reset-otp:${normalizedEmail}`;
+
+
+            /*
+             * IMPORTANT:
+             *
+             * This uses the Redis helper
+             * pattern we have been using:
+             *
+             * setValue(key, value, ttl)
+             *
+             */
+
+            await setValue(
+
+                redisKey,
+
+                JSON.stringify({
+
+                    otp:
+                        hashedOtp,
+
+                    attempts:
+                        0
+
+                }),
+
+                300
+
+            );
+
+
+            // -----------------------------
+            // Send OTP email
+            // -----------------------------
+
+            await sendPasswordResetOtpEmail(
+                normalizedEmail,
+                otp
+            );
+
+
+            return res.status(200).json({
+
+                message:
+                    'If the email is registered, a password reset OTP has been sent.'
+
+            });
+
+        }
+
+        catch (error) {
+
+            console.error(
+                'Forgot password error:',
+                error
+            );
+
+            return res.status(500).json({
+                message:
+                    'Failed to process password reset request'
+            });
+
+        }
+
+    }
+);
+
+
+// =====================================================
+// FORGOT PASSWORD - VERIFY OTP
+// =====================================================
+
+app.post(
+    '/api/auth/verify-password-reset-otp',
+    async (req, res) => {
+
+        try {
+
+            const {
+                email,
+                otp
+            } = req.body;
+
+
+            // -----------------------------
+            // Required validation
+            // -----------------------------
+
+            if (!email || !otp) {
+
+                return res.status(400).json({
+                    message:
+                        'Email and OTP are required'
+                });
+
+            }
+
+
+            const normalizedEmail =
+                email
+                    .toLowerCase()
+                    .trim();
+
+
+            // -----------------------------
+            // Get OTP from Redis
+            // -----------------------------
+
+            const redisKey =
+                `password-reset-otp:${normalizedEmail}`;
+
+
+            const storedValue =
+                await getValue(
+                    redisKey
+                );
+
+
+            if (!storedValue) {
+
+                return res.status(400).json({
+                    message:
+                        'OTP not found or has expired. Please request a new OTP.'
+                });
+
+            }
+
+
+            // -----------------------------
+            // Parse Redis value
+            // -----------------------------
+
+            let otpData;
+
+            try {
+
+                otpData =
+                    JSON.parse(
+                        storedValue
+                    );
+
+            }
+
+            catch (error) {
+
+                console.error(
+                    'Invalid Redis OTP data:',
+                    error
+                );
+
+                await deleteValue(
+                    redisKey
+                );
+
+                return res.status(400).json({
+                    message:
+                        'Invalid OTP session. Please request a new OTP.'
+                });
+
+            }
+
+
+            // -----------------------------
+            // Maximum attempts
+            // -----------------------------
+
+            if (
+                otpData.attempts >= 5
+            ) {
+
+                await deleteValue(
+                    redisKey
+                );
+
+                return res.status(429).json({
+
+                    message:
+                        'Too many incorrect attempts. Please request a new OTP.'
+
+                });
+
+            }
+
+
+            // -----------------------------
+            // Compare OTP
+            // -----------------------------
+
+            const isValidOtp =
+                await bcrypt.compare(
+                    otp,
+                    otpData.otp
+                );
+
+
+            if (!isValidOtp) {
+
+                otpData.attempts += 1;
+
+
+                /*
+                 * Keep the same Redis record.
+                 *
+                 * See note below regarding TTL.
+                 */
+
+                await setValue(
+
+                    redisKey,
+
+                    JSON.stringify(
+                        otpData
+                    ),
+
+                    300
+
+                );
+
+
+                return res.status(400).json({
+                    message:
+                        'Invalid OTP'
+                });
+
+            }
+
+
+            // -----------------------------
+            // OTP verified
+            // -----------------------------
+
+            await deleteValue(
+                redisKey
+            );
+
+
+            // -----------------------------
+            // Generate reset token
+            // -----------------------------
+
+            const resetToken =
+                jwt.sign(
+
+                    {
+                        email:
+                            normalizedEmail,
+
+                        purpose:
+                            'password-reset'
+                    },
+
+                    process.env.JWT_SECRET,
+
+                    {
+                        expiresIn:
+                            '10m'
+                    }
+
+                );
+
+
+            return res.status(200).json({
+
+                message:
+                    'OTP verified successfully',
+
+                resetToken
+
+            });
+
+        }
+
+        catch (error) {
+
+            console.error(
+                'Password reset OTP verification error:',
+                error
+            );
+
+            return res.status(500).json({
+
+                message:
+                    'Failed to verify password reset OTP'
+
+            });
+
+        }
+
+    }
+);
+
+// =====================================================
+// FORGOT PASSWORD - RESET PASSWORD
+// =====================================================
+
+app.post(
+    '/api/auth/reset-password',
+    async (req, res) => {
+
+        try {
+
+            const {
+                resetToken,
+                newPassword,
+                confirmPassword
+            } = req.body;
+
+
+            // -----------------------------
+            // Required validation
+            // -----------------------------
+
+            if (
+                !resetToken ||
+                !newPassword ||
+                !confirmPassword
+            ) {
+
+                return res.status(400).json({
+                    message:
+                        'Reset token, new password and confirm password are required'
+                });
+
+            }
+
+
+            // -----------------------------
+            // Verify reset token
+            // -----------------------------
+
+            let decodedToken;
+
+            try {
+
+                decodedToken =
+                    jwt.verify(
+
+                        resetToken,
+
+                        process.env.JWT_SECRET
+
+                    );
+
+            }
+
+            catch (error) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Password reset session has expired. Please start again.'
+
+                });
+
+            }
+
+
+            // -----------------------------
+            // Check token purpose
+            // -----------------------------
+
+            if (
+                decodedToken.purpose !==
+                'password-reset'
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Invalid password reset token'
+
+                });
+
+            }
+
+
+            // -----------------------------
+            // Password match
+            // -----------------------------
+
+            if (
+                newPassword !==
+                confirmPassword
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Passwords do not match'
+
+                });
+
+            }
+
+
+            // -----------------------------
+            // Password validation
+            // -----------------------------
+
+            const passwordRegex =
+                /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{9,}$/;
+
+
+            if (
+                !passwordRegex.test(
+                    newPassword
+                )
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Password must contain at least 9 characters, one uppercase, one lowercase, one number and one special character'
+
+                });
+
+            }
+
+
+            // -----------------------------
+            // Find user
+            // -----------------------------
+
+            const user =
+                await User.findOne({
+
+                    email:
+                        decodedToken.email
+
+                });
+
+
+            if (!user) {
+
+                return res.status(404).json({
+
+                    message:
+                        'User not found'
+
+                });
+
+            }
+
+
+            // -----------------------------
+            // Hash new password
+            // -----------------------------
+
+            const hashedPassword =
+                await bcrypt.hash(
+                    newPassword,
+                    12
+                );
+
+
+            // -----------------------------
+            // Update password
+            // -----------------------------
+
+            user.password =
+                hashedPassword;
+
+
+            await user.save();
+
+
+            return res.status(200).json({
+
+                message:
+                    'Password reset successfully'
+
+            });
+
+        }
+
+        catch (error) {
+
+            console.error(
+                'Reset password error:',
+                error
+            );
+
+            return res.status(500).json({
+
+                message:
+                    'Failed to reset password'
+
+            });
+
+        }
+
+    }
+);
+
 
 startServer();

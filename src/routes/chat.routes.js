@@ -27,6 +27,11 @@ const {
 } =
     require('../services/conversation-pdf.service');
 
+const {
+    sendConversationPdfEmail
+} =
+    require('../services/email.service');
+
 const path =
     require('path');
 
@@ -1167,6 +1172,164 @@ router.get(
 
                 message:
                     'Failed to generate conversation PDF'
+
+            });
+
+        }
+
+    }
+);
+
+// =====================================================
+// EMAIL CONVERSATION AS PDF
+// =====================================================
+
+router.post(
+    '/conversations/:id/email-pdf',
+
+    authenticateUser,
+
+    async (
+        req,
+        res
+    ) => {
+
+        try {
+
+            const userId =
+                req.user?.userId;
+
+
+            if (!userId) {
+
+                return res.status(401).json({
+
+                    message:
+                        'Authentication required'
+
+                });
+
+            }
+
+
+            const conversation =
+                await Conversation.findOne({
+
+                    _id:
+                        req.params.id,
+
+                    userId
+
+                });
+
+
+            if (!conversation) {
+
+                return res.status(404).json({
+
+                    message:
+                        'Conversation not found'
+
+                });
+
+            }
+
+
+            const user =
+                await User.findById(
+                    userId
+                )
+                    .select(
+                        'email firstName lastName'
+                    );
+
+
+            if (!user) {
+
+                return res.status(404).json({
+
+                    message:
+                        'User not found'
+
+                });
+
+            }
+
+
+            if (!user.email) {
+
+                return res.status(400).json({
+
+                    message:
+                        'User email is not available'
+
+                });
+
+            }
+
+
+            const pdfBuffer =
+                await generateConversationPdf(
+                    conversation
+                );
+
+
+            const safeTitle =
+                (
+                    conversation.title ||
+                    'conversation'
+                )
+                    .replace(
+                        /[^a-z0-9]/gi,
+                        '-'
+                    )
+                    .replace(
+                        /-+/g,
+                        '-'
+                    )
+                    .toLowerCase();
+
+
+            const fileName =
+                `${safeTitle}.pdf`;
+
+
+            await sendConversationPdfEmail(
+
+                user.email,
+
+                pdfBuffer,
+
+                fileName,
+
+                conversation.title
+
+            );
+
+
+            return res.status(200).json({
+
+                message:
+                    'Conversation PDF sent to your email',
+
+                email:
+                    user.email
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                'Conversation email PDF error:',
+                error
+            );
+
+
+            return res.status(500).json({
+
+                message:
+                    'Failed to email conversation PDF'
 
             });
 

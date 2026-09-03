@@ -49,6 +49,45 @@ const sendOtpEmail = async (email, otp) => {
 };
 
 
+const sendConversationPdfEmail = async (
+    to,
+    pdfBuffer,
+    fileName,
+    conversationTitle
+) => {
+
+    await transporter.sendMail({
+
+        to,
+
+        subject:
+            `AI Chat Conversation - ${conversationTitle || 'Conversation'}`,
+
+        text:
+            `Your AI Chat conversation is attached as a PDF.`,
+
+        attachments: [
+
+            {
+                filename:
+                    fileName,
+
+                content:
+                    pdfBuffer,
+
+                contentType:
+                    'application/pdf'
+
+            }
+
+        ]
+
+    });
+
+};
+
+
 module.exports = {
-    sendOtpEmail
+    sendOtpEmail,
+    sendConversationPdfEmail
 };

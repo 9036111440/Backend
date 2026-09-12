@@ -14,6 +14,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const paymentRoutes =
     require('./routes/payment.routes');
+const http = require('http');
 
 
 const {
@@ -45,6 +46,12 @@ const chatRoutes =
 const adminRoutes =
     require('./routes/admin.routes');
 
+const groupChatRoutes =
+    require('./routes/group-chat.routes');
+
+const initializeSocket =
+    require('./services/socket.service');
+
 
 
 const app = express();
@@ -56,6 +63,33 @@ app.use(cors({
   ],
   credentials: true
 }));
+
+const {
+    Server
+} = require('socket.io');
+
+
+const server =
+    http.createServer(app);
+
+    const io =
+    new Server(
+        server,
+        {
+            cors: {
+                origin: [
+                    'http://localhost:4200',
+                    'https://frontend-git-main-giri22.vercel.app',
+                    'https://frontend-giri22.vercel.app'
+                ],
+                credentials: true
+            }
+        }
+    );
+
+
+initializeSocket(io);
+
 app.use(express.json());
 app.use(cookieParser());
 app.use(
@@ -69,6 +103,10 @@ app.use(
 app.use(
     '/api/admin',
     adminRoutes
+);
+app.use(
+    '/api/group-chat',
+    groupChatRoutes
 );
 
 const PORT = process.env.PORT || 3000;
@@ -856,7 +894,7 @@ const startServer = async () => {
         // START SERVER
         // =================================
 
-        app.listen(
+        server.listen(
             PORT,
             () => {
 
@@ -864,15 +902,22 @@ const startServer = async () => {
                     `🚀 Server running on http://localhost:${PORT}`
                 );
 
+                console.log(
+                    `🔌 Socket.IO running on port ${PORT}`
+                );
+
             }
         );
 
-    } catch (error) {
+    }
+
+    catch (error) {
 
         console.error(
             '❌ Server startup failed:',
             error
         );
+
 
         process.exit(1);
 

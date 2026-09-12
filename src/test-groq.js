@@ -1,37 +1,40 @@
-const Groq = require('groq-sdk');
 require('dotenv').config();
+
+const Groq = require('groq-sdk');
 
 const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY
 });
 
-async function testGroq() {
+async function testModels() {
+
     try {
 
-        console.log('Testing Groq API...');
+        const models =
+            await groq.models.list();
 
-        const response = await groq.chat.completions.create({
-            model: 'llama-3.3-70b-versatile',
-            messages: [
-                {
-                    role: 'user',
-                    content: 'whats 22 *72'
-                }
-            ]
+        console.log('\nAvailable models:\n');
+
+        models.data.forEach(model => {
+
+            console.log(
+                model.id
+            );
+
         });
-
-        console.log('✅ Groq API is working!');
-        console.log('\nResponse:');
-        console.log(response.choices[0].message.content);
 
     } catch (error) {
 
-        console.error('❌ Groq API failed');
+        console.error(
+            'Failed to fetch models'
+        );
 
-        console.error('Status:', error.status);
-        console.error('Message:', error.message);
+        console.error(
+            error.message
+        );
 
     }
+
 }
 
-testGroq();
+testModels();

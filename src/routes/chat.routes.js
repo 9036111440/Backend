@@ -433,28 +433,72 @@ return res.status(200).json({
 
     }
 );
+// =====================================================
+// GET USER + GROUP CONVERSATIONS
+// =====================================================
+
 router.get(
     '/conversations',
     authenticateUser,
 
     async (req, res) => {
-        console.log(req.user)
 
         try {
+
+            const userId =
+                req.user.userId;
+
+
+            console.log(
+                '📋 Loading conversations for user:',
+                userId
+            );
+
+
+            // -------------------------------------------------
+            // Personal conversations:
+            //     userId = current user
+            //
+            // Group conversations:
+            //     userId = owner
+            //     OR
+            //     participants.userId = current user
+            // -------------------------------------------------
 
             const conversations =
                 await Conversation
                     .find({
-                        // userId: '6a89adb932fa4c587cdc34f0'
-                        userId: req.user.userId
+
+                        $or: [
+
+                            {
+                                userId
+                            },
+
+                            {
+                                'participants.userId':
+                                    userId
+                            }
+
+                        ]
+
                     })
+
                     .sort({
-                        updatedAt: -1
+
+                        updatedAt:
+                            -1
+
                     })
+
                     .select(
-                        '_id title createdAt updatedAt messages'
+                        '_id title createdAt updatedAt messages isGroup participants userId'
                     );
 
+
+            // -------------------------------------------------
+            // Prepare response for Angular
+            // -------------------------------------------------
 
             const result =
                 conversations.map(
@@ -470,19 +514,43 @@ router.get(
                             conversation.updatedAt,
 
                         messageCount:
-                            conversation.messages.length
+                            conversation.messages.length,
+
+                        isGroup:
+                            conversation.isGroup,
+
+                        ownerId:
+                            conversation.userId,
+
+                        memberCount:
+                            conversation.isGroup
+                                ? conversation.participants.length
+                                : 0
 
                     })
                 );
 
 
-            res.json(result);
+            console.log(
+                `📋 Found ${result.length} conversations`
+            );
 
-        } catch (error) {
 
-            console.error(error);
+            return res.status(200).json(
+                result
+            );
 
-            res.status(500).json({
+        }
+
+        catch (error) {
+
+            console.error(
+                '❌ Load conversations error:',
+                error
+            );
+
+
+            return res.status(500).json({
 
                 message:
                     'Failed to load conversations'

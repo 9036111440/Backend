@@ -13,6 +13,16 @@ const messageSchema = new mongoose.Schema(
             required: true
         },
 
+        senderId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        },
+
+        senderName: {
+            type: String,
+            trim: true
+        },
+
         attachment: {
             type: {
                 type: String
@@ -54,6 +64,34 @@ const conversationSchema = new mongoose.Schema(
             type: String,
             default: 'New Chat'
         },
+        isGroup: {
+            type: Boolean,
+            default: false
+        },
+
+        participants: [
+            {
+                userId: {
+                    type: mongoose.Schema.Types.ObjectId,
+                    ref: 'User',
+                    required: true
+                },
+
+                role: {
+                    type: String,
+                    enum: [
+                        'owner',
+                        'member'
+                    ],
+                    default: 'member'
+                },
+
+                joinedAt: {
+                    type: Date,
+                    default: Date.now
+                }
+            }
+        ],
 
         messages: {
             type: [messageSchema],

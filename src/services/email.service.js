@@ -10,42 +10,52 @@ const transporter = nodemailer.createTransport({
 });
 
 
+const { BrevoClient } = require('@getbrevo/brevo');
+
+const brevo = new BrevoClient({
+    apiKey: process.env.BREVO_API_KEY
+});
+
 const sendOtpEmail = async (email, otp) => {
+    try {
+        const result = await brevo.transactionalEmails.sendTransacEmail({
+            sender: {
+                name: 'AI Chatbot',
+                email: process.env.EMAIL_FROM
+            },
+            to: [
+                {
+                    email: email
+                }
+            ],
+            subject: 'AI Chatbot - Email Verification OTP',
+            htmlContent: `
+                <div style="font-family: Arial, sans-serif;">
+                    <h2>Email Verification</h2>
+                    <p>Your OTP is:</p>
 
-    const mailOptions = {
+                    <h1 style="letter-spacing: 5px;">
+                        ${otp}
+                    </h1>
 
-        from: process.env.EMAIL_USER,
+                    <p>This OTP is valid for 5 minutes.</p>
 
-        to: email,
+                    <p>
+                        If you did not request this OTP,
+                        please ignore this email.
+                    </p>
+                </div>
+            `
+        });
 
-        subject: 'AI Chatbot - Email Verification OTP',
+        console.log('OTP email sent via Brevo:', result.messageId);
 
-        html: `
-            <div style="font-family: Arial, sans-serif;">
+        return result;
 
-                <h2>Email Verification</h2>
-
-                <p>
-                    Your verification OTP is:
-                </p>
-
-                <h1 style="letter-spacing: 5px;">
-                    ${otp}
-                </h1>
-
-                <p>
-                    This OTP is valid for <strong>5 minutes</strong>.
-                </p>
-
-                <p>
-                    If you did not request this OTP, please ignore this email.
-                </p>
-
-            </div>
-        `
-    };
-
-    await transporter.sendMail(mailOptions);
+    } catch (error) {
+        console.error('Brevo OTP email error:', error);
+        throw error;
+    }
 };
 
 
@@ -91,70 +101,55 @@ const sendConversationPdfEmail = async (
 // SEND PASSWORD RESET OTP EMAIL
 // =====================================================
 
-const sendPasswordResetOtpEmail = async (
-    email,
-    otp
-) => {
+const sendPasswordResetOtpEmail = async (email, otp) => {
+    try {
+        const result = await brevo.transactionalEmails.sendTransacEmail({
+            sender: {
+                name: 'AI Chatbot',
+                email: process.env.EMAIL_FROM
+            },
+            to: [
+                {
+                    email: email
+                }
+            ],
+            subject: 'AI Chatbot - Password Reset OTP',
+            htmlContent: `
+                <div style="font-family: Arial, sans-serif;">
+                    <h2>Password Reset</h2>
 
-    await transporter.sendMail({
+                    <p>Your password reset OTP is:</p>
 
-        from:
-            process.env.EMAIL_USER,
+                    <h1 style="letter-spacing: 5px;">
+                        ${otp}
+                    </h1>
 
-        to:
-            email,
+                    <p>
+                        This OTP is valid for 5 minutes.
+                    </p>
 
-        subject:
-            'AI Chatbot - Password Reset OTP',
+                    <p>
+                        Maximum attempts: 5.
+                    </p>
+                </div>
+            `
+        });
 
-        html: `
-            <div
-                style="
-                    font-family: Arial, sans-serif;
-                    max-width: 600px;
-                    margin: 0 auto;
-                    padding: 20px;
-                "
-            >
+        console.log(
+            'Password reset email sent via Brevo:',
+            result.messageId
+        );
 
-                <h2>
-                    Reset Your Password
-                </h2>
+        return result;
 
-                <p>
-                    Use the following OTP to reset
-                    your AI Chatbot password:
-                </p>
+    } catch (error) {
+        console.error(
+            'Brevo password reset email error:',
+            error
+        );
 
-                <h1
-                    style="
-                        letter-spacing: 6px;
-                        margin: 20px 0;
-                    "
-                >
-                    ${otp}
-                </h1>
-
-                <p>
-                    This OTP is valid for
-                    <strong>5 minutes</strong>.
-                </p>
-
-                <p>
-                    You have a maximum of
-                    <strong>5 attempts</strong>
-                    to enter the correct OTP.
-                </p>
-
-                <p>
-                    If you did not request a password
-                    reset, you can safely ignore this email.
-                </p>
-
-            </div>
-        `
-    });
-
+        throw error;
+    }
 };
 
 module.exports = {

@@ -52,6 +52,9 @@ const groupChatRoutes =
 const initializeSocket =
     require('./services/socket.service');
 
+const voiceRoutes =
+    require('./routes/voice.routes');;
+
 
 
 const app = express();
@@ -107,6 +110,10 @@ app.use(
 app.use(
     '/api/group-chat',
     groupChatRoutes
+);
+app.use(
+    '/api/voice',
+    voiceRoutes
 );
 
 const PORT = process.env.PORT || 3000;

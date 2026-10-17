@@ -59,42 +59,48 @@ const sendOtpEmail = async (email, otp) => {
 };
 
 
+
 const sendConversationPdfEmail = async (
     to,
     pdfBuffer,
     fileName,
     conversationTitle
 ) => {
+    try {
+        const result =
+            await brevo.transactionalEmails.sendTransacEmail({
+                sender: {
+                    name: 'AI Chatbot',
+                    email: process.env.EMAIL_FROM
+                },
+                to: [
+                    {
+                        email: to
+                    }
+                ],
+                subject: `AI Chat Conversation - ${
+                    conversationTitle || 'Conversation'
+                }`,
+                textContent:
+                    'Your AI Chat conversation is attached as a PDF.',
+                attachment: [
+                    {
+                        name: fileName,
+                        content: Buffer.from(pdfBuffer).toString('base64')
+                    }
+                ]
+            });
 
-    await transporter.sendMail({
+        console.log('Conversation PDF email sent via Brevo:',
+            result.messageId);
 
-        to,
-
-        subject:
-            `AI Chat Conversation - ${conversationTitle || 'Conversation'}`,
-
-        text:
-            `Your AI Chat conversation is attached as a PDF.`,
-
-        attachments: [
-
-            {
-                filename:
-                    fileName,
-
-                content:
-                    pdfBuffer,
-
-                contentType:
-                    'application/pdf'
-
-            }
-
-        ]
-
-    });
-
+        return result;
+    } catch (error) {
+        console.error('Brevo PDF email error:', error);
+        throw error;
+    }
 };
+
 
 
 // =====================================================
@@ -152,9 +158,61 @@ const sendPasswordResetOtpEmail = async (email, otp) => {
     }
 };
 
+
+const sendPaymentInvoiceEmail = async ({
+    email,
+    customerName,
+    invoiceNumber,
+    paymentId,
+    orderId,
+    amount,
+    paymentDate
+}) => {
+    const result =
+        await brevo.transactionalEmails.sendTransacEmail({
+            sender: {
+                name: 'AI Chatbot',
+                email: process.env.EMAIL_FROM
+            },
+            to: [{ email }],
+            subject: `Payment Receipt - ${invoiceNumber}`,
+            textContent: `
+Hello ${customerName},
+
+Thank you for purchasing AI Chatbot Pro!
+
+PAYMENT RECEIPT
+
+Invoice Number: ${invoiceNumber}
+Customer: ${customerName}
+Email: ${email}
+Product: AI Chatbot Pro Subscription
+Amount Paid: INR ${Number(amount).toFixed(2)}
+Payment Status: Paid
+Payment Date: ${paymentDate.toISOString()}
+
+Razorpay Payment ID: ${paymentId}
+Razorpay Order ID: ${orderId}
+
+Thank you for your purchase!
+
+AI Chatbot Team
+            `.trim()
+        });
+
+    console.log(
+        'Payment receipt email sent:',
+        result.messageId
+    );
+
+    return result;
+};
+
+
 module.exports = {
     sendOtpEmail,
     sendConversationPdfEmail,
     sendPasswordResetOtpEmail,
+    sendPaymentInvoiceEmail
 
 };

@@ -2,6 +2,11 @@ const express = require('express');
 
 const crypto = require('crypto');
 
+
+const {
+    sendPaymentInvoiceEmail
+} = require('../services/email.service');
+
 const razorpay =
     require('../services/razorpay.service');
 
@@ -342,6 +347,34 @@ router.post(
 
 
             await user.save();
+
+            
+try {
+    if (!user.email) {
+        throw new Error('Customer email is missing');
+    }
+
+    const paymentDate = new Date();
+
+    await sendPaymentInvoiceEmail({
+        email: user.email,
+        customerName:
+            user.name || user.username || 'Customer',
+        invoiceNumber: `INV-${payment.razorpayPaymentId}`,
+        paymentId: payment.razorpayPaymentId,
+        orderId: payment.razorpayOrderId,
+        amount: payment.amount / 100,
+        paymentDate
+    });
+} catch (emailError) {
+    // Payment has succeeded. Email failure must not
+    // turn a successful payment into an API failure.
+    console.error(
+        'Payment receipt email failed:',
+        emailError
+    );
+}
+
 
 
             return res.status(200).json({

@@ -265,6 +265,109 @@ router.post(
 // { audioChunks, mimeType, truncated }
 // =====================================================
 
+function cleanMarkdownForSpeech(input) {
+
+    const lines =
+        String(input || '')
+            .replace(/\r/g, '')
+            .split('\n');
+
+    const output = [];
+
+    let insideCodeBlock = false;
+
+    for (const line of lines) {
+
+        // Don't read code punctuation aloud.
+        if (/^\s*```/.test(line)) {
+
+            if (!insideCodeBlock) {
+                output.push(
+                    'A code example is shown in the chat.'
+                );
+            }
+
+            insideCodeBlock = !insideCodeBlock;
+
+            continue;
+        }
+
+        if (insideCodeBlock) {
+            continue;
+        }
+
+        // Ignore Markdown table separator rows.
+        if (
+            /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
+                .test(line)
+        ) {
+            continue;
+        }
+
+        let cleaned = line.trim();
+
+        // Convert table rows into spoken sentences.
+        if (
+            cleaned.startsWith('|') &&
+            cleaned.endsWith('|')
+        ) {
+
+            cleaned = cleaned
+                .slice(1, -1)
+                .split('|')
+                .map(cell => cell.trim())
+                .filter(Boolean)
+                .join('. ');
+
+        }
+
+        cleaned = cleaned
+
+            // Links: speak the label, not the URL.
+            .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+            .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+
+            // Inline code: speak its content.
+            .replace(/`([^`]+)`/g, '$1')
+
+            // Bold, italics and strikethrough.
+            .replace(/\*\*(.*?)\*\*/g, '$1')
+            .replace(/__(.*?)__/g, '$1')
+            .replace(/\*(.*?)\*/g, '$1')
+            .replace(/_(.*?)_/g, '$1')
+            .replace(/~~(.*?)~~/g, '$1')
+
+            // Headings and blockquotes.
+            .replace(/^\s{0,3}#{1,6}\s+/g, '')
+            .replace(/^\s*>\s?/g, '')
+
+            // Lists are spoken without Markdown markers.
+            .replace(/^\s*[-*+]\s+/g, '')
+            .replace(/^\s*\d+[.)]\s+/g, '')
+
+            // Horizontal rules.
+            .replace(/^\s*[-*_]{3,}\s*$/g, '')
+
+            // Clean remaining Markdown characters.
+            .replace(/[#*`|]/g, ' ')
+
+            // Collapse excess whitespace.
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        if (cleaned) {
+            output.push(cleaned);
+        }
+    }
+
+    return output
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .replace(/\s+([,.;:!?])/g, '$1')
+        .trim();
+}
+
+
 router.post(
     '/speech',
     authenticateUser,
@@ -293,9 +396,17 @@ router.post(
 
             const maxSpeechChars = 1200;
 
-            let speechText = text;
-            let truncated = false;
+let speechText =
+    cleanMarkdownForSpeech(text);
 
+let truncated = false;
+
+if (!speechText) {
+
+    speechText =
+        'The full response is available in the chat.';
+
+}
 
             if (speechText.length > maxSpeechChars) {
 

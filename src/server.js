@@ -1,16 +1,120 @@
+require('dotenv').config();
+
+const dns = require('dns');
+
+dns.setServers([
+  '8.8.8.8',
+  '1.1.1.1'
+]);
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const paymentRoutes =
+    require('./routes/payment.routes');
+const http = require('http');
 
-require('dotenv').config();
 
+const {
+    connectRedis,
+     setValue,
+    getValue,
+    deleteValue
+} = require('./services/redis.service');
 const User = require('./models/user.model');
+const EmailOtp = require('./models/otp.model');
+const { sendOtpEmail ,  sendPasswordResetOtpEmail } = require('./services/email.service');
+const {
+    generateOtp,
+    saveOtp,
+    verifyOtp
+} =
+    require('./services/email-otp.service');
+
+const cookieParser = require('cookie-parser');
+
+const {
+    generateAccessToken,
+    generateRefreshToken
+} = require('./utils/token.util');
+
+const chatRoutes =
+    require('./routes/chat.routes');
+
+const adminRoutes =
+    require('./routes/admin.routes');
+
+const groupChatRoutes =
+    require('./routes/group-chat.routes');
+
+const initializeSocket =
+    require('./services/socket.service');
+
+const voiceRoutes =
+    require('./routes/voice.routes');;
+
+
 
 const app = express();
+app.use(cors({
+  origin: [
+    'http://localhost:4200',
+    'https://frontend-git-main-giri22.vercel.app',
+    'https://frontend-giri22.vercel.app'
+  ],
+  credentials: true
+}));
 
-app.use(cors());
+const {
+    Server
+} = require('socket.io');
+
+
+const server =
+    http.createServer(app);
+
+    const io =
+    new Server(
+        server,
+        {
+            cors: {
+                origin: [
+                    'http://localhost:4200',
+                    'https://frontend-git-main-giri22.vercel.app',
+                    'https://frontend-giri22.vercel.app'
+                ],
+                credentials: true
+            }
+        }
+    );
+
+
+initializeSocket(io);
+
 app.use(express.json());
+app.use(cookieParser());
+app.use(
+    '/api/chat',
+    chatRoutes
+);
+app.use(
+    '/api/payment',
+    paymentRoutes
+);
+app.use(
+    '/api/admin',
+    adminRoutes
+);
+app.use(
+    '/api/group-chat',
+    groupChatRoutes
+);
+app.use(
+    '/api/voice',
+    voiceRoutes
+);
 
 const PORT = process.env.PORT || 3000;
 
@@ -47,9 +151,66 @@ app.post('/api/auth/register', async (req, res) => {
             lastName,
             email,
             password,
-            confirmPassword
+            confirmPassword,
+            verificationToken
         } = req.body;
 
+                if (!verificationToken) {
+
+            return res.status(400).json({
+                message: 'Please verify your email first'
+            });
+
+        }
+
+
+        let decodedToken;
+
+        try {
+
+            decodedToken = jwt.verify(
+                verificationToken,
+                process.env.JWT_SECRET
+            );
+
+        } catch (error) {
+
+            return res.status(400).json({
+                message:
+                    'Email verification expired. Please verify your email again.'
+            });
+
+        }
+
+
+        if (
+            decodedToken.purpose !==
+            'email-verification'
+        ) {
+
+            return res.status(400).json({
+                message:
+                    'Invalid email verification'
+            });
+
+        }
+
+
+        const normalizedEmail =
+            email.toLowerCase().trim();
+
+
+        if (
+            decodedToken.email !==
+            normalizedEmail
+        ) {
+
+            return res.status(400).json({
+                message:
+                    'Verified email does not match registration email'
+            });
+
+        }
 
         // Required fields
         if (
@@ -104,6 +265,7 @@ app.post('/api/auth/register', async (req, res) => {
 
         }
 
+        
 
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 12);
@@ -117,7 +279,7 @@ app.post('/api/auth/register', async (req, res) => {
             password: hashedPassword
         });
 
-
+        user.lastLoginAt = new Date(); 
         await user.save();
 
 
@@ -128,7 +290,9 @@ app.post('/api/auth/register', async (req, res) => {
                 id: user._id,
                 firstName: user.firstName,
                 lastName: user.lastName,
-                email: user.email
+                email: user.email,
+                role: user.role,
+                plan: user.plan
             }
         });
 
@@ -144,11 +308,1244 @@ app.post('/api/auth/register', async (req, res) => {
 
 });
 
+// =============================================
+// SEND OTP
+// =============================================
 
-app.listen(PORT, () => {
+app.post(
+    '/api/auth/send-otp',
+    async (req, res) => {
 
-    console.log(
-        `🚀 Server running on http://localhost:${PORT}`
-    );
+        try {
+
+            const {
+                email
+            } = req.body;
+
+
+            // =================================
+            // VALIDATE EMAIL
+            // =================================
+
+            if (!email) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Email is required'
+
+                });
+
+            }
+
+
+            // =================================
+            // NORMALIZE EMAIL
+            // =================================
+
+            const normalizedEmail =
+                email.toLowerCase().trim();
+
+
+            // =================================
+            // VALIDATE EMAIL FORMAT
+            // =================================
+
+            const emailRegex =
+                /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+
+            if (
+                !emailRegex.test(
+                    normalizedEmail
+                )
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Please provide a valid email'
+
+                });
+
+            }
+
+
+            // =================================
+            // CHECK EXISTING USER
+            // =================================
+
+            const existingUser =
+                await User.findOne({
+
+                    email:
+                        normalizedEmail
+
+                });
+
+
+            if (existingUser) {
+
+                return res.status(409).json({
+
+                    message:
+                        'Email already registered'
+
+                });
+
+            }
+
+
+            // =================================
+            // GENERATE OTP
+            // =================================
+
+            const otp =
+                generateOtp();
+
+
+            console.log(
+                `📧 OTP generated for ${normalizedEmail}`
+            );
+
+
+            // =================================
+            // SAVE OTP IN REDIS
+            // TTL = 5 MINUTES
+            // =================================
+
+            await saveOtp(
+                normalizedEmail,
+                otp
+            );
+
+
+            console.log(
+                '✅ OTP stored in Redis for 5 minutes'
+            );
+
+
+            // =================================
+            // SEND EMAIL
+            // =================================
+
+            await sendOtpEmail(
+                normalizedEmail,
+                otp
+            );
+
+
+            console.log(
+                `✅ OTP email sent to ${normalizedEmail}`
+            );
+
+
+            // =================================
+            // RESPONSE
+            // =================================
+
+            return res.status(200).json({
+
+                message:
+                    'OTP sent successfully'
+
+            });
+
+        }
+
+
+        catch (error) {
+
+            console.error(
+                '❌ Send OTP error:',
+                error
+            );
+
+
+            return res.status(500).json({
+
+                message:
+                    'Failed to send OTP'
+
+            });
+
+        }
+
+    }
+);
+
+// =============================================
+// VERIFY OTP
+// =============================================
+
+app.post(
+    '/api/auth/verify-otp',
+    async (req, res) => {
+
+        try {
+
+            const {
+                email,
+                otp
+            } = req.body;
+
+
+            // =================================
+            // REQUIRED VALIDATION
+            // =================================
+
+            if (!email || !otp) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Email and OTP are required'
+
+                });
+
+            }
+
+
+            // =================================
+            // NORMALIZE EMAIL
+            // =================================
+
+            const normalizedEmail =
+                email.toLowerCase().trim();
+
+
+            // =================================
+            // VALIDATE OTP FORMAT
+            // =================================
+
+            if (
+                !/^\d{6}$/.test(
+                    otp.toString()
+                )
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'OTP must be a 6-digit number'
+
+                });
+
+            }
+
+
+            // =================================
+            // VERIFY USING REDIS
+            // =================================
+
+            const result =
+                await verifyOtp(
+                    normalizedEmail,
+                    otp.toString()
+                );
+
+
+            // =================================
+            // OTP EXPIRED
+            // =================================
+
+            if (
+                result.reason ===
+                'OTP_EXPIRED'
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'OTP has expired. Please request a new OTP.'
+
+                });
+
+            }
+
+
+            // =================================
+            // MAX ATTEMPTS
+            // =================================
+
+            if (
+                result.reason ===
+                'MAX_ATTEMPTS'
+            ) {
+
+                return res.status(429).json({
+
+                    message:
+                        'Too many incorrect attempts. Please request a new OTP.'
+
+                });
+
+            }
+
+
+            // =================================
+            // INVALID OTP
+            // =================================
+
+            if (
+                result.reason ===
+                'INVALID_OTP'
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        `Invalid OTP. ${result.attemptsLeft} attempts remaining.`
+
+                });
+
+            }
+
+
+            // =================================
+            // OTP VERIFIED
+            // =================================
+
+            const verificationToken =
+                jwt.sign(
+
+                    {
+                        email:
+                            normalizedEmail,
+
+                        purpose:
+                            'email-verification'
+
+                    },
+
+                    process.env.JWT_SECRET,
+
+                    {
+                        expiresIn:
+                            '15m'
+                    }
+
+                );
+
+
+            // =================================
+            // SUCCESS
+            // =================================
+
+            return res.status(200).json({
+
+                message:
+                    'Email verified successfully',
+
+                verificationToken
+
+            });
+
+        }
+
+
+        catch (error) {
+
+            console.error(
+                '❌ Verify OTP error:',
+                error
+            );
+
+
+            return res.status(500).json({
+
+                message:
+                    'Failed to verify OTP'
+
+            });
+
+        }
+
+    }
+);
+
+app.post('/api/auth/login', async (req, res) => {
+
+    try {
+
+        const {
+            email,
+            password
+        } = req.body;
+
+
+        // -----------------------------
+        // Required validation
+        // -----------------------------
+
+        if (!email || !password) {
+
+            return res.status(400).json({
+                message: 'Email and password are required'
+            });
+
+        }
+
+
+        const normalizedEmail =
+            email.toLowerCase().trim();
+
+
+        // -----------------------------
+        // Find user
+        // -----------------------------
+
+        const user = await User.findOne({
+            email: normalizedEmail
+        });
+
+
+        if (!user) {
+
+            return res.status(401).json({
+                message: 'Invalid email or password'
+            });
+
+        }
+
+
+        // -----------------------------
+        // Compare password
+        // -----------------------------
+
+        const isPasswordValid =
+            await bcrypt.compare(
+                password,
+                user.password
+            );
+
+
+        if (!isPasswordValid) {
+
+            return res.status(401).json({
+                message: 'Invalid email or password'
+            });
+
+        }
+
+
+        // -----------------------------
+        // Generate tokens
+        // -----------------------------
+
+        const accessToken =
+            generateAccessToken(user);
+
+        const refreshToken =
+            generateRefreshToken(user);
+
+
+        // -----------------------------
+        // Send refresh token as cookie
+        // -----------------------------
+
+        res.cookie(
+            'refreshToken',
+            refreshToken,
+            {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite:
+                    process.env.NODE_ENV === 'production'
+                        ? 'none'
+                        : 'lax',
+
+                maxAge: 7 * 24 * 60 * 60 * 1000
+            }
+        );
+
+
+        // -----------------------------
+        // Also send tokens in headers
+        // -----------------------------
+
+        res.setHeader(
+            'X-Access-Token',
+            accessToken
+        );
+
+        res.setHeader(
+            'X-Refresh-Token',
+            refreshToken
+        );
+
+
+        // -----------------------------
+        // Response
+        // -----------------------------
+
+        return res.status(200).json({
+
+            message: 'Login successful',
+
+            accessToken,
+
+            refreshToken,
+
+            user: {
+
+                id: user._id,
+
+                firstName: user.firstName,
+
+                lastName: user.lastName,
+
+                email: user.email,
+                
+                role: user.role,
+                
+                plan: user.plan
+
+            }
+
+        });
+
+
+    } catch (error) {
+
+        console.error(
+            'Login error:',
+            error
+        );
+
+        return res.status(500).json({
+            message: 'Something went wrong'
+        });
+
+    }
 
 });
+
+
+// =============================================
+// LOGOUT
+// =============================================
+
+app.post(
+    '/api/auth/logout',
+    (req, res) => {
+
+        try {
+
+            // =================================
+            // CLEAR REFRESH TOKEN COOKIE
+            // =================================
+
+            res.clearCookie(
+                'refreshToken',
+                {
+                    httpOnly: true,
+
+                    secure:
+                        process.env.NODE_ENV ===
+                        'production',
+
+                    sameSite:
+                        process.env.NODE_ENV ===
+                        'production'
+                            ? 'none'
+                            : 'lax'
+                }
+            );
+
+
+            // =================================
+            // RESPONSE
+            // =================================
+
+            return res.status(200).json({
+
+                message:
+                    'Logout successful'
+
+            });
+
+        }
+        catch (error) {
+
+            console.error(
+                'Logout error:',
+                error
+            );
+
+            return res.status(500).json({
+
+                message:
+                    'Logout failed'
+
+            });
+
+        }
+
+    }
+);
+
+
+const startServer = async () => {
+
+    try {
+
+        // =================================
+        // CONNECT REDIS
+        // =================================
+
+        await connectRedis();
+
+
+        // =================================
+        // START SERVER
+        // =================================
+
+        server.listen(
+            PORT,
+            () => {
+
+                console.log(
+                    `🚀 Server running on http://localhost:${PORT}`
+                );
+
+                console.log(
+                    `🔌 Socket.IO running on port ${PORT}`
+                );
+
+            }
+        );
+
+    }
+
+    catch (error) {
+
+        console.error(
+            '❌ Server startup failed:',
+            error
+        );
+
+
+        process.exit(1);
+
+    }
+
+};
+
+// =====================================================
+// FORGOT PASSWORD - SEND OTP
+// =====================================================
+
+app.post(
+    '/api/auth/forgot-password',
+    async (req, res) => {
+
+        try {
+
+            const {
+                email
+            } = req.body;
+
+
+            // -----------------------------
+            // Required validation
+            // -----------------------------
+
+            if (!email) {
+
+                return res.status(400).json({
+                    message:
+                        'Email is required'
+                });
+
+            }
+
+
+            // -----------------------------
+            // Normalize email
+            // -----------------------------
+
+            const normalizedEmail =
+                email
+                    .toLowerCase()
+                    .trim();
+
+
+            // -----------------------------
+            // Validate email format
+            // -----------------------------
+
+            const emailRegex =
+                /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+
+            if (
+                !emailRegex.test(
+                    normalizedEmail
+                )
+            ) {
+
+                return res.status(400).json({
+                    message:
+                        'Please provide a valid email'
+                });
+
+            }
+
+
+            // -----------------------------
+            // Find user
+            // -----------------------------
+
+            const user =
+                await User.findOne({
+                    email:
+                        normalizedEmail
+                });
+
+
+            /*
+             * Do not reveal whether an email
+             * exists or not.
+             *
+             * This avoids account enumeration.
+             */
+
+            if (!user) {
+
+                return res.status(200).json({
+
+                    message:
+                        'If the email is registered, a password reset OTP has been sent.'
+
+                });
+
+            }
+
+
+            // -----------------------------
+            // Generate 6-digit OTP
+            // -----------------------------
+
+            const otp =
+                crypto
+                    .randomInt(
+                        100000,
+                        1000000
+                    )
+                    .toString();
+
+
+            // -----------------------------
+            // Hash OTP
+            // -----------------------------
+
+            const hashedOtp =
+                await bcrypt.hash(
+                    otp,
+                    10
+                );
+
+
+            // -----------------------------
+            // Redis key
+            // -----------------------------
+
+            const redisKey =
+                `password-reset-otp:${normalizedEmail}`;
+
+
+            /*
+             * IMPORTANT:
+             *
+             * This uses the Redis helper
+             * pattern we have been using:
+             *
+             * setValue(key, value, ttl)
+             *
+             */
+
+            await setValue(
+
+                redisKey,
+
+                JSON.stringify({
+
+                    otp:
+                        hashedOtp,
+
+                    attempts:
+                        0
+
+                }),
+
+                300
+
+            );
+
+
+            // -----------------------------
+            // Send OTP email
+            // -----------------------------
+
+            await sendPasswordResetOtpEmail(
+                normalizedEmail,
+                otp
+            );
+
+
+            return res.status(200).json({
+
+                message:
+                    'If the email is registered, a password reset OTP has been sent.'
+
+            });
+
+        }
+
+        catch (error) {
+
+            console.error(
+                'Forgot password error:',
+                error
+            );
+
+            return res.status(500).json({
+                message:
+                    'Failed to process password reset request'
+            });
+
+        }
+
+    }
+);
+
+
+// =====================================================
+// FORGOT PASSWORD - VERIFY OTP
+// =====================================================
+
+app.post(
+    '/api/auth/verify-password-reset-otp',
+    async (req, res) => {
+
+        try {
+
+            const {
+                email,
+                otp
+            } = req.body;
+
+
+            // -----------------------------
+            // Required validation
+            // -----------------------------
+
+            if (!email || !otp) {
+
+                return res.status(400).json({
+                    message:
+                        'Email and OTP are required'
+                });
+
+            }
+
+
+            const normalizedEmail =
+                email
+                    .toLowerCase()
+                    .trim();
+
+
+            // -----------------------------
+            // Get OTP from Redis
+            // -----------------------------
+
+            const redisKey =
+                `password-reset-otp:${normalizedEmail}`;
+
+
+            const storedValue =
+                await getValue(
+                    redisKey
+                );
+
+
+            if (!storedValue) {
+
+                return res.status(400).json({
+                    message:
+                        'OTP not found or has expired. Please request a new OTP.'
+                });
+
+            }
+
+
+            // -----------------------------
+            // Parse Redis value
+            // -----------------------------
+
+            let otpData;
+
+            try {
+
+                otpData =
+                    JSON.parse(
+                        storedValue
+                    );
+
+            }
+
+            catch (error) {
+
+                console.error(
+                    'Invalid Redis OTP data:',
+                    error
+                );
+
+                await deleteValue(
+                    redisKey
+                );
+
+                return res.status(400).json({
+                    message:
+                        'Invalid OTP session. Please request a new OTP.'
+                });
+
+            }
+
+
+            // -----------------------------
+            // Maximum attempts
+            // -----------------------------
+
+            if (
+                otpData.attempts >= 5
+            ) {
+
+                await deleteValue(
+                    redisKey
+                );
+
+                return res.status(429).json({
+
+                    message:
+                        'Too many incorrect attempts. Please request a new OTP.'
+
+                });
+
+            }
+
+
+            // -----------------------------
+            // Compare OTP
+            // -----------------------------
+
+            const isValidOtp =
+                await bcrypt.compare(
+                    otp,
+                    otpData.otp
+                );
+
+
+            if (!isValidOtp) {
+
+                otpData.attempts += 1;
+
+
+                /*
+                 * Keep the same Redis record.
+                 *
+                 * See note below regarding TTL.
+                 */
+
+                await setValue(
+
+                    redisKey,
+
+                    JSON.stringify(
+                        otpData
+                    ),
+
+                    300
+
+                );
+
+
+                return res.status(400).json({
+                    message:
+                        'Invalid OTP'
+                });
+
+            }
+
+
+            // -----------------------------
+            // OTP verified
+            // -----------------------------
+
+            await deleteValue(
+                redisKey
+            );
+
+
+            // -----------------------------
+            // Generate reset token
+            // -----------------------------
+
+            const resetToken =
+                jwt.sign(
+
+                    {
+                        email:
+                            normalizedEmail,
+
+                        purpose:
+                            'password-reset'
+                    },
+
+                    process.env.JWT_SECRET,
+
+                    {
+                        expiresIn:
+                            '10m'
+                    }
+
+                );
+
+
+            return res.status(200).json({
+
+                message:
+                    'OTP verified successfully',
+
+                resetToken
+
+            });
+
+        }
+
+        catch (error) {
+
+            console.error(
+                'Password reset OTP verification error:',
+                error
+            );
+
+            return res.status(500).json({
+
+                message:
+                    'Failed to verify password reset OTP'
+
+            });
+
+        }
+
+    }
+);
+
+// =====================================================
+// FORGOT PASSWORD - RESET PASSWORD
+// =====================================================
+
+app.post(
+    '/api/auth/reset-password',
+    async (req, res) => {
+
+        try {
+
+            const {
+                resetToken,
+                newPassword,
+                confirmPassword
+            } = req.body;
+
+
+            // -----------------------------
+            // Required validation
+            // -----------------------------
+
+            if (
+                !resetToken ||
+                !newPassword ||
+                !confirmPassword
+            ) {
+
+                return res.status(400).json({
+                    message:
+                        'Reset token, new password and confirm password are required'
+                });
+
+            }
+
+
+            // -----------------------------
+            // Verify reset token
+            // -----------------------------
+
+            let decodedToken;
+
+            try {
+
+                decodedToken =
+                    jwt.verify(
+
+                        resetToken,
+
+                        process.env.JWT_SECRET
+
+                    );
+
+            }
+
+            catch (error) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Password reset session has expired. Please start again.'
+
+                });
+
+            }
+
+
+            // -----------------------------
+            // Check token purpose
+            // -----------------------------
+
+            if (
+                decodedToken.purpose !==
+                'password-reset'
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Invalid password reset token'
+
+                });
+
+            }
+
+
+            // -----------------------------
+            // Password match
+            // -----------------------------
+
+            if (
+                newPassword !==
+                confirmPassword
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Passwords do not match'
+
+                });
+
+            }
+
+
+            // -----------------------------
+            // Password validation
+            // -----------------------------
+
+            const passwordRegex =
+                /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{9,}$/;
+
+
+            if (
+                !passwordRegex.test(
+                    newPassword
+                )
+            ) {
+
+                return res.status(400).json({
+
+                    message:
+                        'Password must contain at least 9 characters, one uppercase, one lowercase, one number and one special character'
+
+                });
+
+            }
+
+
+            // -----------------------------
+            // Find user
+            // -----------------------------
+
+            const user =
+                await User.findOne({
+
+                    email:
+                        decodedToken.email
+
+                });
+
+
+            if (!user) {
+
+                return res.status(404).json({
+
+                    message:
+                        'User not found'
+
+                });
+
+            }
+
+
+            // -----------------------------
+            // Hash new password
+            // -----------------------------
+
+            const hashedPassword =
+                await bcrypt.hash(
+                    newPassword,
+                    12
+                );
+
+
+            // -----------------------------
+            // Update password
+            // -----------------------------
+
+            user.password =
+                hashedPassword;
+
+
+            await user.save();
+
+
+            return res.status(200).json({
+
+                message:
+                    'Password reset successfully'
+
+            });
+
+        }
+
+        catch (error) {
+
+            console.error(
+                'Reset password error:',
+                error
+            );
+
+            return res.status(500).json({
+
+                message:
+                    'Failed to reset password'
+
+            });
+
+        }
+
+    }
+);
+
+
+startServer();

@@ -173,11 +173,11 @@ router.post(
 
 
                 console.log(
-                    `📊 Demo chat usage: ${userChatCount}/3`
+                    `📊 Demo chat usage: ${userChatCount}/100`
                 );
 
 
-                if (userChatCount >= 3) {
+                if (userChatCount >= 100) {
 
                     return res.status(403).json({
 
@@ -185,13 +185,13 @@ router.post(
                             'CHAT_LIMIT_REACHED',
 
                         message:
-                            'You have reached the 3-message Demo limit for this conversation.',
+                            'You have reached the 100 message Demo limit for this conversation.',
 
                         plan:
                             'demo',
 
                         limit:
-                            3,
+                            100,
 
                         used:
                             userChatCount
